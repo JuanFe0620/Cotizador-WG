@@ -1,301 +1,611 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { 
+  Calculator, Settings, Eye, AlertCircle, History, 
+  CheckCircle2, Plus, ChevronLeft, ChevronRight 
+} from 'lucide-react';
+
+import Configurador from './components/Cotizador/Configurador';
+import Resumen from './components/Cotizador/Resumen';
+import VisorM3 from './components/Visor3D/VisorM3';
+import Galeria from './components/Galeria/Galeria';
+import PanelAdmin from './components/Admin/PanelAdmin';
+import HistorialCotizaciones from './components/Historial/HistorialCotizaciones';
+
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
 
 export default function App() {
-  const [seccionAdmin, setSeccionAdmin] = useState('tubos');
+  const [tabActual, setTabActual] = useState('cotizador');
+  const visorRef = useRef(null);
+  
+  // Persistencia dual: Backend / LocalStorage sincronizado con el Admin
+  const [laminas, setLaminas] = useState(() => {
+    const local = localStorage.getItem('m3_laminas');
+    return local ? JSON.parse(local) : [];
+  });
+  
+  const [tubos, setTubos] = useState(() => {
+    const local = localStorage.getItem('m3_tubos');
+    return local ? JSON.parse(local) : [];
+  });
+  
+  const [accesorios, setAccesorios] = useState(() => {
+    const local = localStorage.getItem('m3_accesorios');
+    return local ? JSON.parse(local) : [];
+  });
 
-  // Estado del Catálogo de la Base de Datos
-  const [tubos, setTubos] = useState([
-    { id: 1, forma: 'Cuadrado', material: 'Galvanizado', calibre: '18', tamano: '1" x 1"', precioTubo: 48000, costoMetro: 8000 },
-    { id: 2, forma: 'Rectangular', material: 'HR', calibre: '20', tamano: '2" x 1"', precioTubo: 62000, costoMetro: 10333 }
-  ]);
+  const [pinturas, setPinturas] = useState(() => {
+    const local = localStorage.getItem('m3_pinturas');
+    return local ? JSON.parse(local) : [];
+  });
 
-  const [laminas, setLaminas] = useState([
-    { id: 1, tipo: 'Cold Rolled', calibre: '18', dimensiones: '1200x2400 mm', precioLamina: 140000, costoCm2: 4.86 },
-    { id: 2, tipo: 'Galvanizada', calibre: '20', dimensiones: '1200x2400 mm', precioLamina: 115000, costoCm2: 3.99 }
-  ]);
+  // Guardar dinámicamente en LocalStorage cuando Admin modifique el estado
+  useEffect(() => {
+    localStorage.setItem('m3_laminas', JSON.stringify(laminas));
+  }, [laminas]);
 
-  const [accesorios, setAccesorios] = useState([
-    { id: 1, categoria: 'Seguridad', descripcion: 'Chapa para gabinete doble pase', precio: 28000 },
-    { id: 2, categoria: 'Soporte', descripcion: 'Par de refuerzos para piso', precio: 18000 }
-  ]);
+  useEffect(() => {
+    localStorage.setItem('m3_tubos', JSON.stringify(tubos));
+  }, [tubos]);
 
-  // Formulario temporal
-  const [nuevoTubo, setNuevoTubo] = useState({ forma: 'Cuadrado', material: 'Galvanizado', calibre: '18', tamano: '1x1', precioTubo: '' });
-  const [nuevaLamina, setNuevaLamina] = useState({ tipo: 'Cold Rolled', calibre: '18', precioLamina: '' });
-  const [nuevoAccesorio, setNuevoAccesorio] = useState({ categoria: 'Chapa', descripcion: '', precio: '' });
+  useEffect(() => {
+    localStorage.setItem('m3_accesorios', JSON.stringify(accesorios));
+  }, [accesorios]);
 
-  // Funciones de Agregar
-  const agregarTubo = () => {
-    if (!nuevoTubo.precioTubo) return;
-    const precio = parseFloat(nuevoTubo.precioTubo);
-    const item = {
-      id: Date.now(),
-      ...nuevoTubo,
-      precioTubo: precio,
-      costoMetro: Math.round(precio / 6)
+  useEffect(() => {
+    localStorage.setItem('m3_pinturas', JSON.stringify(pinturas));
+  }, [pinturas]);
+
+  const [itemsCotizacion, setItemsCotizacion] = useState([]);
+  const [consecutivo, setConsecutivo] = useState('COT-2001');
+  const [categoriaSel, setCategoriaSel] = useState('gabinetes');
+  const [nivelPrecio, setNivelPrecio] = useState(1);
+  const [cargandoCotizacion, setCargandoCotizacion] = useState(false);
+  const [errorBackend, setErrorBackend] = useState(null);
+  const [mensajeExito, setMensajeExito] = useState(null);
+
+  // Estados para el Historial y Navegación
+  const [historialCotizaciones, setHistorialCotizaciones] = useState([]);
+
+  // Control de modo activo para el Visor 3D
+  const [editandoFormulario, setEditandoFormulario] = useState(true);
+
+  const [params, setParams] = useState({
+    laminaId: '',
+    alto: 120,
+    ancho: 60,
+    fondo: 60,
+    tramos: [],
+    accesoriosSeleccionados: [],
+    detallesAccesorios: {},
+    cantidadesAcc: {},
+    incluirBioporter: false,
+    incluirBase: true,
+    incluirPlatina: true,
+    formaBase: 'Base Redonda',
+    ladoBase: 25,
+    laminaAnclajeId: '',
+    incluirPiesAmigo: true,
+    cantidadPies: 4,
+    altoCartela: 10,
+    colorPintura: '#2563eb',
+    nombrePintura: 'Azul Poliéster Electrostática',
+    precioPinturaKg: 24000,
+    rendimientoPinturaKgM2: 8.0
+  });
+
+  const actualizarParams = (action) => {
+    setEditandoFormulario(true);
+    setParams(action);
+  };
+
+  const obtenerSiguienteConsecutivo = async () => {
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/cotizaciones/siguiente-consecutivo`);
+      if (r.ok) {
+        const data = await r.json();
+        if (data.consecutivo) setConsecutivo(data.consecutivo);
+      }
+    } catch (e) {
+      console.warn("No se pudo obtener el consecutivo dinámico:", e);
+    }
+  };
+
+  // Estado para los brazos
+  const [brazos, setBrazos] = useState(() => {
+    const local = localStorage.getItem('m3_brazos');
+    return local ? JSON.parse(local) : [];
+  });
+
+  useEffect(() => {
+    localStorage.setItem('m3_brazos', JSON.stringify(brazos));
+  }, [brazos]);
+
+  const cargarDatosServidor = async () => {
+    try {
+      const [resLaminas, resTubos, resAcc, resPin, resBrazos] = await Promise.all([
+        fetch(`${API_BASE_URL}/api/laminas`).then(r => r.ok ? r.json() : null),
+        fetch(`${API_BASE_URL}/api/tubos`).then(r => r.ok ? r.json() : null),
+        fetch(`${API_BASE_URL}/api/accesorios`).then(r => r.ok ? r.json() : null),
+        fetch(`${API_BASE_URL}/api/pinturas`).then(r => r.ok ? r.json() : null),
+        fetch(`${API_BASE_URL}/api/brazos`).then(r => r.ok ? r.json() : null)
+      ]);
+
+      if (resLaminas && resLaminas.length > 0) setLaminas(resLaminas);
+      if (resTubos && resTubos.length > 0) setTubos(resTubos);
+      if (resAcc && resAcc.length > 0) setAccesorios(resAcc);
+      if (resPin && resPin.length > 0) setPinturas(resPin);
+      if (resBrazos && resBrazos.length > 0) setBrazos(resBrazos);
+    } catch (err) {
+      console.warn("Utilizando registros locales sincronizados por ausencia de backend:", err);
+    }
+  };
+
+  const cargarHistorial = async (filtro = '') => {
+    try {
+      const url = filtro 
+        ? `${API_BASE_URL}/api/cotizaciones?q=${encodeURIComponent(filtro)}`
+        : `${API_BASE_URL}/api/cotizaciones`;
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        setHistorialCotizaciones(data);
+        return data;
+      }
+    } catch (e) {
+      console.error("Error al cargar historial:", e);
+    }
+    return [];
+  };
+
+  useEffect(() => {
+    cargarDatosServidor();
+    obtenerSiguienteConsecutivo();
+    cargarHistorial();
+  }, []);
+
+  // Limpieza estricta de parámetros según la categoría seleccionada
+  useEffect(() => {
+    const esPosteOBrazo = categoriaSel === 'postes' || categoriaSel === 'brazos';
+    
+    setEditandoFormulario(true);
+    setParams(prev => {
+      const nuevoState = {
+        ...prev,
+        accesoriosSeleccionados: [],
+        detallesAccesorios: {},
+        cantidadesAcc: {},
+        tramos: esPosteOBrazo 
+          ? [{ id: Date.now(), alto: 150, tuboId: '', forma: 'redondo' }] 
+          : []
+      };
+
+      // Si cambiamos a Gabinetes o Totems, se eliminan los brazos retenidos
+      if (!esPosteOBrazo) {
+        delete nuevoState.brazo;
+        delete nuevoState.brazosMontados;
+        delete nuevoState.brazos;
+        delete nuevoState.brazoPTZ;
+        delete nuevoState.brazo_id;
+      }
+
+      return nuevoState;
+    });
+  }, [categoriaSel]);
+
+  const handleNuevaCotizacion = async () => {
+    setItemsCotizacion([]);
+    await obtenerSiguienteConsecutivo();
+    setEditandoFormulario(true);
+    setMensajeExito("Nueva cotización iniciada.");
+    setTimeout(() => setMensajeExito(null), 3000);
+  };
+
+  const handleNavegarCotizacion = async (direccion) => {
+    let lista = historialCotizaciones;
+    if (lista.length === 0) {
+      lista = await cargarHistorial();
+    }
+
+    const numActual = parseInt(consecutivo.replace(/\D/g, ''), 10);
+    if (isNaN(numActual)) return;
+
+    if (direccion === 'anterior') {
+      const objetivo = `COT-${numActual - 1}`;
+      const encontrada = lista.find(c => c.consecutivo === objetivo);
+      if (encontrada) {
+        await handleCargarCotizacionExistente(encontrada.id);
+      } else {
+        setConsecutivo(objetivo);
+        setItemsCotizacion([]);
+      }
+    } else if (direccion === 'siguiente') {
+      const objetivo = `COT-${numActual + 1}`;
+      const encontrada = lista.find(c => c.consecutivo === objetivo);
+      if (encontrada) {
+        await handleCargarCotizacionExistente(encontrada.id);
+      } else {
+        await obtenerSiguienteConsecutivo();
+        setItemsCotizacion([]);
+      }
+    }
+  };
+
+  const handleCambioCategoria = (nuevaCat) => {
+    setCategoriaSel(nuevaCat);
+    setErrorBackend(null);
+  };
+
+  const handleAgregarACotizacion = async (payload = {}) => {
+    setCargandoCotizacion(true);
+    setErrorBackend(null);
+
+    const esGabinete = categoriaSel === 'gabinetes' || categoriaSel === 'totems';
+    const paramsUnificados = { ...params, ...payload };
+    
+    // Si es Gabinete/Totem, remover cualquier residuo de brazos pasados por params
+    if (esGabinete) {
+      delete paramsUnificados.brazo;
+      delete paramsUnificados.brazosMontados;
+      delete paramsUnificados.brazos;
+      delete paramsUnificados.brazoPTZ;
+      delete paramsUnificados.brazo_id;
+    }
+
+    const tramosFiltrados = esGabinete ? [] : (paramsUnificados.tramos || []);
+    const rawAccs = paramsUnificados.accesoriosSeleccionados || [];
+    const accsValidos = rawAccs.filter(id => id !== null && id !== undefined && id !== '');
+
+    const paramsParaBackend = {
+      ...paramsUnificados,
+      tramos: tramosFiltrados,
+      accesoriosSeleccionados: accsValidos,
+      cantidadesAcc: paramsUnificados.cantidadesAcc || {},
+      detallesAccesorios: paramsUnificados.detallesAccesorios || {},
+      incluirBase: esGabinete ? false : (paramsUnificados.incluirBase ?? true),
+      incluirPlatina: esGabinete ? false : (paramsUnificados.incluirPlatina ?? true),
+      formaBase: paramsUnificados.formaBase || 'Base Redonda',
+      ladoBase: esGabinete ? 0 : Number(paramsUnificados.ladoBase || paramsUnificados.dimensionBase || 25),
+      laminaAnclajeId: paramsUnificados.laminaAnclajeId || paramsUnificados.laminaId || '',
+      incluirPiesAmigo: esGabinete ? false : (paramsUnificados.incluirPiesAmigo ?? true),
+      cantidadPies: Number(paramsUnificados.cantidadPies || 4),
+      altoCartela: Number(paramsUnificados.altoCartela || 10)
     };
-    setTubos([...tubos, item]);
-    setNuevoTubo({ forma: 'Cuadrado', material: 'Galvanizado', calibre: '18', tamano: '1x1', precioTubo: '' });
-  };
 
-  const agregarLamina = () => {
-    if (!nuevaLamina.precioLamina) return;
-    const precio = parseFloat(nuevaLamina.precioLamina);
-    const item = {
+    let dataServidor = null;
+
+    try {
+      const respuesta = await fetch(`${API_BASE_URL}/api/cotizar/item`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          categoria: categoriaSel,
+          nivelPrecio: nivelPrecio,
+          params: paramsParaBackend
+        })
+      });
+
+      if (respuesta.ok) {
+        dataServidor = await respuesta.json();
+      } else {
+        console.warn("El backend respondió con error, usando estimación local.");
+      }
+    } catch (error) {
+      console.warn("Servidor no accesible, calculando ítem localmente...", error);
+    }
+
+    let materialNombre = 'Estructura Estándar';
+    if (categoriaSel === 'postes' || categoriaSel === 'brazos') {
+      materialNombre = 'Estructura Postes Multi-Tramo';
+    } else {
+      const laminaObj = laminas.find(l => String(l.id) === String(paramsParaBackend.laminaId));
+      if (laminaObj) {
+        materialNombre = `${laminaObj.material || 'Lámina'} (${laminaObj.calibre || 'Estándar'})`;
+      }
+    }
+
+    const nuevoItem = {
       id: Date.now(),
-      ...nuevaLamina,
-      dimensiones: '1200x2400 mm',
-      precioLamina: precio,
-      costoCm2: (precio / 28800).toFixed(2)
+      categoria: (categoriaSel || '').toUpperCase(),
+      descripcion: `${materialNombre} - Pintura: ${paramsParaBackend.nombrePintura || 'Estándar'} (${dataServidor?.area_m2 || 1.5} m²)`,
+      lamina: materialNombre,
+      laminaId: paramsParaBackend.laminaId,
+      pintura: paramsParaBackend.nombrePintura || 'Estándar',
+      colorPintura: paramsParaBackend.colorPintura || '#2563eb',
+      costoPintura: dataServidor?.costo_pintura_venta || 18500,
+      costoTubos: dataServidor?.costo_tubos_venta || 0,
+      areaPintable: dataServidor?.area_m2 || 1.5,
+      alto: paramsParaBackend.alto || 150,
+      ancho: paramsParaBackend.ancho || 50,
+      fondo: paramsParaBackend.fondo || 30,
+
+      incluirBase: paramsParaBackend.incluirBase,
+      incluirPlatina: paramsParaBackend.incluirPlatina,
+      formaBase: paramsParaBackend.formaBase,
+      ladoBase: paramsParaBackend.ladoBase,
+      laminaAnclajeId: paramsParaBackend.laminaAnclajeId,
+      incluirPiesAmigo: paramsParaBackend.incluirPiesAmigo,
+      cantidadPies: paramsParaBackend.cantidadPies,
+      altoCartela: paramsParaBackend.altoCartela,
+
+      tramos: tramosFiltrados,
+      accesoriosSeleccionados: paramsParaBackend.accesoriosSeleccionados,
+      detallesAccesorios: paramsParaBackend.detallesAccesorios,
+      cantidadesAcc: paramsUnificados.cantidadesAcc,
+      accesoriosLista: dataServidor?.accesorios_lista || [],
+      costoBase: dataServidor?.costo_base || 401758,
+      total: dataServidor?.precio_venta || 420258
     };
-    setLaminas([...laminas, item]);
-    setNuevaLamina({ tipo: 'Cold Rolled', calibre: '18', precioLamina: '' });
+
+    setItemsCotizacion(prev => [...prev, nuevoItem]);
+
+    setParams(prev => {
+      const res = {
+        ...prev,
+        accesoriosSeleccionados: [],
+        detallesAccesorios: {},
+        cantidadesAcc: {},
+        tramos: (categoriaSel === 'postes' || categoriaSel === 'brazos') 
+          ? [{ id: Date.now(), alto: 150, tuboId: '', forma: 'redondo' }]
+          : []
+      };
+
+      if (esGabinete) {
+        delete res.brazo;
+        delete res.brazosMontados;
+        delete res.brazos;
+        delete res.brazoPTZ;
+      }
+
+      return res;
+    });
+
+    setEditandoFormulario(false);
+    setCargandoCotizacion(false);
   };
 
-  const agregarAccesorio = () => {
-    if (!nuevoAccesorio.precio || !nuevoAccesorio.descripcion) return;
-    const item = {
-      id: Date.now(),
-      ...nuevoAccesorio,
-      precio: parseFloat(nuevoAccesorio.precio)
-    };
-    setAccesorios([...accesorios, item]);
-    setNuevoAccesorio({ categoria: 'Chapa', descripcion: '', precio: '' });
+  const handleGuardarCotizacionBD = async () => {
+    if (itemsCotizacion.length === 0) {
+      alert("No hay ítems para guardar en la cotización.");
+      return;
+    }
+
+    const totalCotizacion = itemsCotizacion.reduce((acc, curr) => acc + (curr.total || 0), 0);
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/cotizaciones/guardar`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          consecutivo: consecutivo,
+          clienteNombre: 'Cliente General (Sin NIT)',
+          nivelPrecio: nivelPrecio,
+          total: totalCotizacion,
+          items: itemsCotizacion
+        })
+      });
+
+      if (!res.ok) throw new Error("Error en la petición de guardado");
+
+      const data = await res.json();
+      setMensajeExito(`Cotización ${data.consecutivo_guardado} guardada correctamente.`);
+      
+      setConsecutivo(data.siguiente_consecutivo);
+      setItemsCotizacion([]);
+      cargarHistorial();
+
+      setTimeout(() => setMensajeExito(null), 4000);
+
+    } catch (e) {
+      console.error("Error al guardar cotización:", e);
+      setErrorBackend("No se pudo conectar con la base de datos para registrar la cotización.");
+    }
   };
 
-  // Funciones de Eliminar
-  const eliminarItem = (id, tipo) => {
-    if (tipo === 'tubos') setTubos(tubos.filter(t => t.id !== id));
-    if (tipo === 'laminas') setLaminas(laminas.filter(l => l.id !== id));
-    if (tipo === 'accesorios') setAccesorios(accesorios.filter(a => a.id !== id));
+  const handleCargarCotizacionExistente = async (id) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/cotizaciones/${id}`);
+      if (!res.ok) throw new Error("No se pudo obtener el detalle");
+      const data = await res.json();
+      
+      setConsecutivo(data.consecutivo);
+      setNivelPrecio(data.nivel_precio || 1);
+      
+      const itemsCargados = data.items || [];
+      setItemsCotizacion(itemsCargados);
+
+      if (itemsCargados.length > 0) {
+        const primerItem = itemsCargados[0];
+        const detalles = primerItem.detalles || {};
+        
+        const catRecuperada = (primerItem.categoria || data.categoria || 'gabinetes').toLowerCase();
+        setCategoriaSel(catRecuperada);
+
+        const altoReal = parseFloat(primerItem.alto || detalles.alto || 150);
+        const anchoReal = parseFloat(primerItem.ancho || detalles.ancho || 50);
+        const fondoReal = parseFloat(primerItem.fondo || detalles.fondo || 30);
+        const laminaReal = primerItem.laminaId || detalles.laminaId || primerItem.lamina || '';
+
+        setParams(prev => ({
+          ...prev,
+          ...detalles,
+          ...primerItem,
+          categoria: catRecuperada,
+          alto: altoReal,
+          ancho: anchoReal,
+          fondo: fondoReal,
+          laminaId: laminaReal,
+          incluirBase: primerItem.incluirBase ?? detalles.incluirBase ?? true,
+          incluirPlatina: primerItem.incluirPlatina ?? detalles.incluirPlatina ?? true,
+          formaBase: primerItem.formaBase || detalles.formaBase || 'Base Redonda',
+          ladoBase: primerItem.ladoBase || detalles.ladoBase || 25,
+          colorPintura: primerItem.colorPintura || detalles.colorPintura || primerItem.pintura || '#2563eb',
+          nombrePintura: primerItem.nombrePintura || primerItem.pintura || 'Estándar',
+          tramos: primerItem.tramos || detalles.tramos || prev.tramos,
+          accesoriosSeleccionados: primerItem.accesoriosSeleccionados || detalles.accesoriosSeleccionados || [],
+          detallesAccesorios: primerItem.detallesAccesorios || detalles.detallesAccesorios || {},
+          cantidadesAcc: primerItem.cantidadesAcc || detalles.cantidadesAcc || {}
+        }));
+      }
+
+      setEditandoFormulario(false);
+      setTabActual('cotizador');
+      setMensajeExito(`Cotización ${data.consecutivo} cargada en el cotizador.`);
+      setTimeout(() => setMensajeExito(null), 3000);
+    } catch (e) {
+      console.error("Error al cargar cotización:", e);
+      alert("Error al intentar recuperar la cotización.");
+    }
   };
+
+  const ultimoItem = itemsCotizacion[itemsCotizacion.length - 1];
+  const datosParaVisor = (!editandoFormulario && ultimoItem) ? ultimoItem : params;
 
   return (
-    <div style={{ backgroundColor: '#f0f4f9', minHeight: '100vh', padding: '30px', fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}>
-      
-      {/* HEADER BENTO STYLE */}
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#ffffff', padding: '20px 30px', borderRadius: '24px', boxShadow: '0 10px 30px rgba(0,0,0,0.03)', marginBottom: '25px' }}>
-        <div>
-          <span style={{ fontSize: '0.8rem', fontWeight: '700', color: '#2563eb', textTransform: 'uppercase', letterSpacing: '1px' }}>ADMINISTRACIÓN CENTRAL</span>
-          <h1 style={{ margin: 0, fontSize: '1.5rem', color: '#0f172a', fontWeight: '800' }}>Catálogo de Precios WG</h1>
+    <div className="w-screen h-screen bg-slate-100 text-slate-800 flex flex-col overflow-hidden m-0 p-0 font-sans">
+      {/* HEADER MODO CLARO */}
+      <header className="bg-white border-b border-slate-300 px-4 py-2 flex justify-between items-center w-full shrink-0 h-14 shadow-sm">
+        <div className="flex items-center gap-3">
+          <div className="bg-blue-600 font-black text-white px-3 py-1 rounded-lg shadow-sm">M3</div>
+          <h1 className="text-base font-bold text-slate-900 hidden md:block">Plataforma Integrada M3</h1>
         </div>
-        <div style={{ display: 'flex', gap: '10px', backgroundColor: '#f8fafc', padding: '6px', borderRadius: '16px' }}>
-          <button style={btnHeaderActive}>🛠️ Base de Datos</button>
-          <button style={btnHeaderInactive}>📋 Cotizador (Próximamente)</button>
+
+        <div className="flex items-center gap-2">
+          <button 
+            onClick={handleNuevaCotizacion}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-1.5 rounded-lg text-xs transition flex items-center gap-1 shadow-sm"
+            title="Crear Nueva Cotización Limpia"
+          >
+            <Plus size={15} /> <span className="hidden sm:inline">Nueva Cotización</span>
+          </button>
+
+          <div className="flex items-center bg-slate-100 rounded-lg border border-slate-300 p-0.5 text-xs">
+            <button 
+              onClick={() => handleNavegarCotizacion('anterior')}
+              className="p-1.5 hover:bg-slate-200 text-slate-700 rounded transition"
+              title="Cotización Anterior"
+            >
+              <ChevronLeft size={16} />
+            </button>
+            <span className="px-2 font-mono font-bold text-blue-600 text-xs">{consecutivo}</span>
+            <button 
+              onClick={() => handleNavegarCotizacion('siguiente')}
+              className="p-1.5 hover:bg-slate-200 text-slate-700 rounded transition"
+              title="Cotización Siguiente"
+            >
+              <ChevronRight size={16} />
+            </button>
+          </div>
         </div>
+
+        <div className="flex items-center gap-2 bg-slate-100 px-3 py-1 rounded-xl border border-slate-300 text-xs">
+          <span className="text-slate-600 font-medium hidden sm:inline">Margen:</span>
+          <select 
+            value={nivelPrecio} 
+            onChange={(e) => setNivelPrecio(Number(e.target.value))}
+            className="bg-white text-blue-700 font-bold outline-none cursor-pointer rounded px-2 py-0.5 border border-slate-300"
+          >
+            <option value={1}>Precio 1 </option>
+            <option value={2}>Precio 2 </option>
+          </select>
+        </div>
+
+        <nav className="flex bg-slate-100 p-1 rounded-xl border border-slate-300 gap-1 text-xs">
+          <button onClick={() => setTabActual('cotizador')} className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 font-semibold transition ${tabActual === 'cotizador' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'}`}><Calculator size={14}/> Cotizador</button>
+          <button onClick={() => setTabActual('historial')} className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 font-semibold transition ${tabActual === 'historial' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'}`}><History size={14}/> Historial</button>
+          <button onClick={() => setTabActual('galeria')} className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 font-semibold transition ${tabActual === 'galeria' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'}`}><Eye size={14}/> 3D</button>
+          <button onClick={() => setTabActual('admin')} className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 font-semibold transition ${tabActual === 'admin' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'}`}><Settings size={14}/> Admin</button>
+        </nav>
       </header>
 
-      {/* METRICAS RAPIDAS (BENTO CARDS) */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '20px', marginBottom: '25px' }}>
-        <div style={cardMetricStyle}>
-          <span style={{ fontSize: '0.85rem', color: '#64748b', fontWeight: '600' }}>Tubos Registrados</span>
-          <h2 style={{ margin: '8px 0 0 0', fontSize: '1.8rem', color: '#2563eb' }}>{tubos.length} Refs</h2>
+      {errorBackend && (
+        <div className="bg-red-100 border-b border-red-300 px-6 py-2 flex items-center justify-between text-red-800 text-xs font-medium">
+          <div className="flex items-center gap-2">
+            <AlertCircle size={16} />
+            <span>{errorBackend}</span>
+          </div>
+          <button onClick={() => setErrorBackend(null)} className="font-bold hover:underline">✕</button>
         </div>
-        <div style={cardMetricStyle}>
-          <span style={{ fontSize: '0.85rem', color: '#64748b', fontWeight: '600' }}>Láminas Estándar</span>
-          <h2 style={{ margin: '8px 0 0 0', fontSize: '1.8rem', color: '#0284c7' }}>{laminas.length} Tipos</h2>
-        </div>
-        <div style={cardMetricStyle}>
-          <span style={{ fontSize: '0.85rem', color: '#64748b', fontWeight: '600' }}>Accesorios en Stock</span>
-          <h2 style={{ margin: '8px 0 0 0', fontSize: '1.8rem', color: '#3b82f6' }}>{accesorios.length} Ítems</h2>
-        </div>
-      </div>
+      )}
 
-      {/* SECTOR PRINCIPAL: NAVEGACIÓN Y TABLAS */}
-      <div style={{ backgroundColor: '#ffffff', padding: '28px', borderRadius: '24px', boxShadow: '0 10px 30px rgba(0,0,0,0.03)' }}>
-        
-        {/* PESTAÑAS AZULES */}
-        <div style={{ display: 'flex', gap: '12px', marginBottom: '25px', borderBottom: '2px solid #f1f5f9', paddingBottom: '15px' }}>
-          <button onClick={() => setSeccionAdmin('tubos')} style={seccionAdmin === 'tubos' ? tabActive : tabInactive}>📐 Tubos (Tiras 6m)</button>
-          <button onClick={() => setSeccionAdmin('laminas')} style={seccionAdmin === 'laminas' ? tabActive : tabInactive}>🔲 Láminas (1200x2400 mm)</button>
-          <button onClick={() => setSeccionAdmin('accesorios')} style={seccionAdmin === 'accesorios' ? tabActive : tabInactive}>🔩 Accesorios</button>
+      {mensajeExito && (
+        <div className="bg-emerald-100 border-b border-emerald-300 px-6 py-2 flex items-center gap-2 text-emerald-800 text-xs font-medium">
+          <CheckCircle2 size={16} />
+          <span>{mensajeExito}</span>
         </div>
+      )}
 
-        {/* CONTENIDO TUBOS */}
-        {seccionAdmin === 'tubos' && (
-          <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: '25px' }}>
-            {/* FORMULARIO AGREGAR */}
-            <div style={formCardStyle}>
-              <h3 style={{ margin: '0 0 15px 0', fontSize: '1.1rem', color: '#0f172a' }}>+ Nuevo Tubo</h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <div>
-                  <label style={labelStyle}>Forma</label>
-                  <input type="text" value={nuevoTubo.forma} onChange={(e)=>setNuevoTubo({...nuevoTubo, forma: e.target.value})} style={inputStyle} />
-                </div>
-                <div>
-                  <label style={labelStyle}>Material</label>
-                  <input type="text" value={nuevoTubo.material} onChange={(e)=>setNuevoTubo({...nuevoTubo, material: e.target.value})} style={inputStyle} />
-                </div>
-                <div>
-                  <label style={labelStyle}>Calibre</label>
-                  <input type="text" value={nuevoTubo.calibre} onChange={(e)=>setNuevoTubo({...nuevoTubo, calibre: e.target.value})} style={inputStyle} />
-                </div>
-                <div>
-                  <label style={labelStyle}>Tamaño / Dimensión</label>
-                  <input type="text" value={nuevoTubo.tamano} onChange={(e)=>setNuevoTubo({...nuevoTubo, tamano: e.target.value})} style={inputStyle} />
-                </div>
-                <div>
-                  <label style={labelStyle}>Precio por Tubo 6m ($)</label>
-                  <input type="number" placeholder="Ej: 48000" value={nuevoTubo.precioTubo} onChange={(e)=>setNuevoTubo({...nuevoTubo, precioTubo: e.target.value})} style={inputStyle} />
-                </div>
-                <button onClick={agregarTubo} style={btnBlueStyle}>Guardar Tubo</button>
+      <main className="flex-1 w-full p-4 overflow-hidden bg-slate-100">
+        {tabActual === 'cotizador' && (
+          <div className="grid grid-cols-12 gap-4 h-full w-full">
+            <div className="col-span-12 lg:col-span-3 h-full overflow-y-auto pr-1">
+              <Configurador 
+                categoriaSel={categoriaSel} 
+                setCategoriaSel={handleCambioCategoria} 
+                params={params} 
+                setParams={actualizarParams} 
+                laminas={laminas}
+                tubos={tubos}
+                accesorios={accesorios} 
+                pinturas={pinturas}
+                handleAgregar={handleAgregarACotizacion} 
+                cargando={cargandoCotizacion}
+              />
+            </div>
+
+            <div className="col-span-12 lg:col-span-3 h-full overflow-y-auto pr-1 flex flex-col gap-4">
+              <div className="flex-1">
+                <Resumen 
+                  items={itemsCotizacion} 
+                  setItems={setItemsCotizacion} 
+                  consecutivo={consecutivo}
+                  setConsecutivo={setConsecutivo}
+                  visorRef={visorRef}
+                  onGuardarCotizacion={handleGuardarCotizacionBD}
+                />
               </div>
             </div>
 
-            {/* TABLA VER CATALOGO */}
-            <div>
-              <h3 style={{ margin: '0 0 15px 0', fontSize: '1.1rem', color: '#0f172a' }}>Catálogo Actual de Tubos</h3>
-              <table style={tableStyle}>
-                <thead>
-                  <tr style={thGroupStyle}>
-                    <th style={thStyle}>Detalle</th>
-                    <th style={thStyle}>Calibre</th>
-                    <th style={thStyle}>Precio 6m</th>
-                    <th style={thStyle}>Costo/m Calculado</th>
-                    <th style={{...thStyle, textAlign: 'center'}}>Acción</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {tubos.map((t) => (
-                    <tr key={t.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                      <td style={tdStyle}><strong>Tubo {t.forma} {t.tamano}</strong><br/><span style={{fontSize: '0.8rem', color: '#64748b'}}>{t.material}</span></td>
-                      <td style={tdStyle}>Cal. {t.calibre}</td>
-                      <td style={{...tdStyle, fontWeight: '700', color: '#0f172a'}}>${t.precioTubo.toLocaleString()}</td>
-                      <td style={{...tdStyle, color: '#2563eb', fontWeight: '600'}}>${t.costoMetro.toLocaleString()} /m</td>
-                      <td style={{...tdStyle, textAlign: 'center'}}>
-                        <button onClick={() => eliminarItem(t.id, 'tubos')} style={btnDelete}>🗑️</button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="col-span-12 lg:col-span-6 h-full">
+              <VisorM3 
+                ref={visorRef}
+                categoriaSel={datosParaVisor.categoria?.toLowerCase() || categoriaSel}
+                ancho={datosParaVisor.ancho}
+                alto={datosParaVisor.alto}
+                fondo={datosParaVisor.fondo}
+                incluirBioporter={params.incluirBioporter}
+                setParams={actualizarParams}
+                params={datosParaVisor}
+                tubos={tubos}
+                laminas={laminas}
+                accesorios={accesorios}
+                colorPintura={datosParaVisor.colorPintura || params.colorPintura}
+              />
             </div>
           </div>
         )}
 
-        {/* CONTENIDO LÁMINAS */}
-        {seccionAdmin === 'laminas' && (
-          <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: '25px' }}>
-            <div style={formCardStyle}>
-              <h3 style={{ margin: '0 0 15px 0', fontSize: '1.1rem', color: '#0f172a' }}>+ Nueva Lámina</h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <div>
-                  <label style={labelStyle}>Tipo de Lámina</label>
-                  <input type="text" value={nuevaLamina.tipo} onChange={(e)=>setNuevaLamina({...nuevaLamina, tipo: e.target.value})} style={inputStyle} />
-                </div>
-                <div>
-                  <label style={labelStyle}>Calibre</label>
-                  <input type="text" value={nuevaLamina.calibre} onChange={(e)=>setNuevaLamina({...nuevaLamina, calibre: e.target.value})} style={inputStyle} />
-                </div>
-                <div>
-                  <label style={labelStyle}>Precio Lámina 1200x2400 mm ($)</label>
-                  <input type="number" placeholder="Ej: 140000" value={nuevaLamina.precioLamina} onChange={(e)=>setNuevaLamina({...nuevaLamina, precioLamina: e.target.value})} style={inputStyle} />
-                </div>
-                <button onClick={agregarLamina} style={btnBlueStyle}>Guardar Lámina</button>
-              </div>
-            </div>
-
-            <div>
-              <h3 style={{ margin: '0 0 15px 0', fontSize: '1.1rem', color: '#0f172a' }}>Catálogo Actual de Láminas</h3>
-              <table style={tableStyle}>
-                <thead>
-                  <tr style={thGroupStyle}>
-                    <th style={thStyle}>Tipo</th>
-                    <th style={thStyle}>Medida Estándar</th>
-                    <th style={thStyle}>Precio Lámina</th>
-                    <th style={thStyle}>Costo/cm² Calculado</th>
-                    <th style={{...thStyle, textAlign: 'center'}}>Acción</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {laminas.map((l) => (
-                    <tr key={l.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                      <td style={tdStyle}><strong>{l.tipo}</strong><br/><span style={{fontSize: '0.8rem', color: '#64748b'}}>Calibre {l.calibre}</span></td>
-                      <td style={tdStyle}>{l.dimensiones}</td>
-                      <td style={{...tdStyle, fontWeight: '700', color: '#0f172a'}}>${l.precioLamina.toLocaleString()}</td>
-                      <td style={{...tdStyle, color: '#0284c7', fontWeight: '600'}}>${l.costoCm2} /cm²</td>
-                      <td style={{...tdStyle, textAlign: 'center'}}>
-                        <button onClick={() => eliminarItem(l.id, 'laminas')} style={btnDelete}>🗑️</button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+        {tabActual === 'historial' && (
+          <HistorialCotizaciones 
+            API_BASE_URL={API_BASE_URL}
+            onCargarCotizacionExistente={handleCargarCotizacionExistente}
+            historialExterno={historialCotizaciones}
+            alCargarHistorial={setHistorialCotizaciones}
+          />
         )}
 
-        {/* CONTENIDO ACCESORIOS */}
-        {seccionAdmin === 'accesorios' && (
-          <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: '25px' }}>
-            <div style={formCardStyle}>
-              <h3 style={{ margin: '0 0 15px 0', fontSize: '1.1rem', color: '#0f172a' }}>+ Nuevo Accesorio</h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <div>
-                  <label style={labelStyle}>Categoría</label>
-                  <input type="text" value={nuevoAccesorio.categoria} onChange={(e)=>setNuevoAccesorio({...nuevoAccesorio, categoria: e.target.value})} style={inputStyle} />
-                </div>
-                <div>
-                  <label style={labelStyle}>Descripción</label>
-                  <input type="text" placeholder="Ej: Chapa doble pase" value={nuevoAccesorio.descripcion} onChange={(e)=>setNuevoAccesorio({...nuevoAccesorio, descripcion: e.target.value})} style={inputStyle} />
-                </div>
-                <div>
-                  <label style={labelStyle}>Precio Unitario ($)</label>
-                  <input type="number" placeholder="Ej: 28000" value={nuevoAccesorio.precio} onChange={(e)=>setNuevoAccesorio({...nuevoAccesorio, precio: e.target.value})} style={inputStyle} />
-                </div>
-                <button onClick={agregarAccesorio} style={btnBlueStyle}>Guardar Accesorio</button>
-              </div>
-            </div>
-
-            <div>
-              <h3 style={{ margin: '0 0 15px 0', fontSize: '1.1rem', color: '#0f172a' }}>Catálogo Actual de Accesorios</h3>
-              <table style={tableStyle}>
-                <thead>
-                  <tr style={thGroupStyle}>
-                    <th style={thStyle}>Categoría</th>
-                    <th style={thStyle}>Descripción</th>
-                    <th style={thStyle}>Precio Unitario</th>
-                    <th style={{...thStyle, textAlign: 'center'}}>Acción</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {accesorios.map((a) => (
-                    <tr key={a.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                      <td style={tdStyle}><span style={{backgroundColor: '#eff6ff', color: '#2563eb', padding: '4px 10px', borderRadius: '8px', fontSize: '0.8rem', fontWeight: '700'}}>{a.categoria}</span></td>
-                      <td style={{...tdStyle, fontWeight: '600', color: '#0f172a'}}>{a.descripcion}</td>
-                      <td style={{...tdStyle, fontWeight: '700', color: '#0f172a'}}>${a.precio.toLocaleString()}</td>
-                      <td style={{...tdStyle, textAlign: 'center'}}>
-                        <button onClick={() => eliminarItem(a.id, 'accesorios')} style={btnDelete}>🗑️</button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+        {tabActual === 'galeria' && <Galeria />}
+        {tabActual === 'admin' && (
+          <PanelAdmin 
+            API_BASE_URL={API_BASE_URL}
+            recargarDatos={cargarDatosServidor}
+            laminas={laminas} setLaminas={setLaminas}
+            tubos={tubos} setTubos={setTubos}
+            accesorios={accesorios} setAccesorios={setAccesorios}
+            pinturas={pinturas} setPinturas={setPinturas}
+            params={params} setParams={actualizarParams}
+          />
         )}
-
-      </div>
+      </main>
     </div>
   );
 }
-
-// ESTILOS DE DISEÑO DASHBOARD (BENTO AZUL)
-const btnHeaderActive = { backgroundColor: '#2563eb', color: 'white', border: 'none', padding: '10px 18px', borderRadius: '12px', fontWeight: '700', fontSize: '0.85rem', cursor: 'pointer' };
-const btnHeaderInactive = { backgroundColor: 'transparent', color: '#64748b', border: 'none', padding: '10px 18px', borderRadius: '12px', fontWeight: '600', fontSize: '0.85rem', cursor: 'default' };
-
-const cardMetricStyle = { backgroundColor: '#ffffff', padding: '20px 24px', borderRadius: '20px', boxShadow: '0 10px 30px rgba(0,0,0,0.03)' };
-
-const tabActive = { padding: '10px 20px', borderRadius: '12px', border: 'none', backgroundColor: '#2563eb', color: 'white', fontWeight: '700', cursor: 'pointer' };
-const tabInactive = { padding: '10px 20px', borderRadius: '12px', border: 'none', backgroundColor: '#f1f5f9', color: '#64748b', fontWeight: '600', cursor: 'pointer' };
-
-const formCardStyle = { backgroundColor: '#f8fafc', padding: '20px', borderRadius: '18px', border: '1px solid #e2e8f0' };
-const labelStyle = { display: 'block', fontSize: '0.78rem', fontWeight: '700', color: '#475569', marginBottom: '4px', textTransform: 'uppercase' };
-const inputStyle = { width: '100%', padding: '10px 12px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '0.9rem', outline: 'none', boxSizing: 'border-box' };
-const btnBlueStyle = { marginTop: '10px', width: '100%', padding: '12px', backgroundColor: '#2563eb', color: 'white', border: 'none', borderRadius: '12px', fontWeight: '700', cursor: 'pointer' };
-
-const tableStyle = { width: '100%', borderCollapse: 'collapse' };
-const thGroupStyle = { backgroundColor: '#f8fafc' };
-const thStyle = { padding: '12px', textAlign: 'left', fontSize: '0.8rem', color: '#64748b', textTransform: 'uppercase', fontWeight: '700' };
-const tdStyle = { padding: '14px 12px', fontSize: '0.9rem', color: '#334155' };
-const btnDelete = { backgroundColor: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '8px', padding: '6px 10px', cursor: 'pointer', fontWeight: 'bold' };

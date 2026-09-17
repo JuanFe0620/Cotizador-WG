@@ -1,0 +1,21 @@
+# Entorno virtual de Python
+venv/
+.venv/
+
+# Dependencias de Node.js (Frontend)
+node_modules/
+frontend/node_modules/
+
+# Archivos de compilación de React/Vite
+frontend/dist/
+frontend/build/
+
+# Archivos temporales de Python y sistema
+__pycache__/
+*.pyc
+.env
+.vscode/
+
+# Planos generados / descargables
+generated_plans/
+*.zip
