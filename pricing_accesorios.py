@@ -42,21 +42,28 @@ def calcular_costo_accesorios_bd(
         params_globales.get("formaBase") or obj_base_g.get("formaBase") or obj_base_g.get("forma") or "cuadrada"
     ).lower()
 
+    # Procesar ÚNICA Y EXCLUSIVAMENTE los accesorios enviados explícitamente
     for item_acc in (accesorios_ids or []):
+        if not item_acc:
+            continue
+
         if isinstance(item_acc, dict):
             acc_id = item_acc.get("id") or item_acc.get("codigo")
             cant_item = item_acc.get("cantidad") or 1
             det_item = item_acc.get("detalles") or item_acc
+            nombre_frontend = item_acc.get("nombre")
         else:
             acc_id = item_acc
             cant_item = None
             det_item = {}
+            nombre_frontend = None
 
-        if not acc_id:
+        if not acc_id or str(acc_id).lower() in ["none", "null", "sin_buje", "ninguno", "", "undefined"]:
             continue
 
         id_str = str(acc_id).lower()
 
+        # Omitir platinas base o de anclaje (se procesan en su propia sección)
         if id_str in ["platina_base", "platina_anclaje"]:
             continue
 
@@ -71,69 +78,80 @@ def calcular_costo_accesorios_bd(
 
         det = detalles.get(str(acc_id)) or detalles.get(acc_id) or det_item or {}
 
+        # BÚSQUEDA ROBUTA EN BASE DE DATOS (POR ID O POR NOMBRE / COINCIDENCIA)
         acc_db = None
         if hasattr(models, 'Accesorio'):
             if id_str.isdigit():
                 acc_db = db.query(models.Accesorio).filter(models.Accesorio.id == int(acc_id)).first()
-            if not acc_db:
-                acc_db = db.query(models.Accesorio).filter(models.Accesorio.id == str(acc_id)).first()
-
-        nombre_acc = getattr(acc_db, 'nombre', '') if acc_db else ''
-        if not nombre_acc:
-            if isinstance(item_acc, dict) and item_acc.get("nombre"):
-                nombre_acc = item_acc.get("nombre")
             else:
-                nombre_acc = str(acc_id).replace("acc_", "").replace("_", " ").title()
+                acc_db = db.query(models.Accesorio).filter(
+                    (models.Accesorio.id == str(acc_id)) | 
+                    (models.Accesorio.nombre.ilike(f"%{acc_id}%"))
+                ).first()
+
+        # Si tampoco está en la tabla Accesorio, buscar en la tabla Buje si existe
+        if not acc_db and hasattr(models, 'Buje'):
+            if id_str.isdigit():
+                acc_db = db.query(models.Buje).filter(models.Buje.id == int(acc_id)).first()
+            else:
+                acc_db = db.query(models.Buje).filter(
+                    (models.Buje.id == str(acc_id)) | 
+                    (models.Buje.nombre.ilike(f"%{acc_id}%"))
+                ).first()
+
+        # Determinación prioritaria del nombre real
+        if nombre_frontend:
+            nombre_acc = nombre_frontend
+        elif acc_db and getattr(acc_db, 'nombre', None):
+            nombre_acc = acc_db.nombre
+        else:
+            nombre_acc = str(acc_id).replace("acc_", "").replace("_", " ").title()
 
         precio_bd = float(getattr(acc_db, 'precio', 0) or getattr(acc_db, 'precio_unitario', 0) or 0)
         categoria_bd = str(getattr(acc_db, 'categoria', '') or '').lower()
 
+        texto_med = ""
+
         # ---------------------------------------------------------------------
-        # ACCESORIO: BUJES (BASE Y PUNTA/CÁMARA)
+        # ACCESORIO: BUJES / ROSETAS / BASES DE BRAZO (PRECIO FIJO CONGELADO)
         # ---------------------------------------------------------------------
-        if "buje" in id_str or "buje" in nombre_acc.lower() or categoria_bd in ["buje", "bujes"]:
+        if (
+            "buje" in id_str or "buje" in nombre_acc.lower() or 
+            categoria_bd in ["buje", "bujes"] or 
+            "roseta" in id_str or "roseta" in nombre_acc.lower() or
+            "base" in id_str or "base" in nombre_acc.lower() or "escualizable" in nombre_acc.lower()
+        ):
             es_fijo = True
-            
-            # Detectar subtipo o especificación (diámetro/posicion)
-            subtipo = str(det.get("subtipo") or det.get("tipo") or "").lower()
-            diametro_buje = float(det.get("diametro") or det.get("diametroBuje") or diametro_tubo_base)
-
-            if "base" in subtipo or "base" in id_str or "base" in nombre_acc.lower():
-                texto_med = f"Base - {diametro_buje}\""
-                # Si no hay precio en BD, calcula según el tamaño de la base
-                costo_unitario = precio_bd if precio_bd > 0 else (35000.0 if diametro_buje <= 2.0 else 48000.0)
-            elif "punta" in subtipo or "camera" in subtipo or "ptz" in subtipo or "punta" in id_str or "ptz" in nombre_acc.lower():
-                texto_med = f"Punta PTZ - {diametro_buje}\""
-                costo_unitario = precio_bd if precio_bd > 0 else (28000.0 if diametro_buje <= 2.0 else 38000.0)
+            # Precios por defecto de respaldo de seed si la base de datos devuelve 0
+            if precio_bd > 0:
+                costo_unitario = precio_bd
+            elif "roseta" in nombre_acc.lower() or "roseta" in id_str:
+                costo_unitario = 15000.0
+            elif "base" in nombre_acc.lower() or "escualizable" in nombre_acc.lower():
+                costo_unitario = 45500.0
             else:
-                texto_med = f"{diametro_buje}\""
-                costo_unitario = precio_bd if precio_bd > 0 else 30000.0
+                costo_unitario = float(det.get("precio") or det.get("costo") or 15000.0)
+            texto_med = ""
 
         # ---------------------------------------------------------------------
-        # ACCESORIO: PUERTA DE VIDRIO (CÁLCULO POR M2)
+        # ACCESORIO: PUERTA DE VIDRIO
         # ---------------------------------------------------------------------
         elif any(k in id_str for k in ["puerta_vidrio", "vidrio"]) or "vidrio" in nombre_acc.lower():
             es_fijo = False
+            alto_cm = float(params_globales.get("alto") or params_globales.get("alto_cm") or det.get("alto") or 100)
+            ancho_cm = float(params_globales.get("ancho") or params_globales.get("ancho_cm") or det.get("ancho") or 60)
             
-            # Captura dimensiones del gabinete desde params_globales
-            alto_cm = float(params_globales.get("alto") or params_globales.get("alto_cm") or 100)
-            ancho_cm = float(params_globales.get("ancho") or params_globales.get("ancho_cm") or 60)
-            
-            # Cálculo del área de la puerta en m²
             area_puerta_m2 = (alto_cm / 100.0) * (ancho_cm / 100.0)
-            
-            # Precio base por m² (traído de BD o valor por defecto)
-            precio_m2_vidrio = precio_bd if precio_bd > 0 else 150000
+            precio_m2_vidrio = precio_bd if precio_bd > 0 else 150000.0
             
             costo_unitario = area_puerta_m2 * precio_m2_vidrio
             texto_med = f"{area_puerta_m2:.2f} m²"
 
         # ---------------------------------------------------------------------
-        # ACCESORIO: PARALES TRASEROS DE RACK (CÁLCULO POR METRO LINEAL)
+        # ACCESORIO: PARALES TRASEROS DE RACK
         # ---------------------------------------------------------------------
         elif "paral" in id_str or "paral" in nombre_acc.lower() or "rack" in id_str:
             es_fijo = True
-            
             alto_cm = float(params_globales.get("alto") or params_globales.get("alto_cm") or 100)
             alto_m = alto_cm / 100.0
             
@@ -147,7 +165,6 @@ def calcular_costo_accesorios_bd(
         elif "corona" in id_str or "corona" in nombre_acc.lower() or "empalme" in id_str:
             es_fijo = False
             cant_perf = int(det.get("cantPerforaciones") or 4)
-
             lamina_acc_id = det.get("laminaId") or det.get("lamina_id") or lamina_general_id
             precio_cm2 = obtener_precio_cm2_lamina(lamina_acc_id, db)
 
@@ -172,8 +189,8 @@ def calcular_costo_accesorios_bd(
                 costo_fabricacion = 5000 + (cant_perf - 4) * 3000.0 
 
             costo_unitario = costo_fabricacion + costo_material_corona
-
             medida_m = medida_cm / 100.0
+
             if "redonda" in forma_base_real or "circulo" in forma_base_real:
                 area_una_cara_m2 = math.pi * ((medida_m / 2.0) ** 2)
             else:
@@ -186,7 +203,6 @@ def calcular_costo_accesorios_bd(
         # ---------------------------------------------------------------------
         elif "guia" in id_str or "guia" in nombre_acc.lower() or "guía" in nombre_acc.lower():
             es_fijo = False
-            
             lamina_acc_id = (
                 det.get("laminaId") or 
                 det.get("lamina_id") or 
@@ -202,8 +218,8 @@ def calcular_costo_accesorios_bd(
             }
 
             costo_unitario = calcular_costo_platina_guia(det_guia, lamina_acc_id, db)
-            
             medida_m = medida_base_real / 100.0
+
             if "redonda" in forma_base_real or "circulo" in forma_base_real:
                 area_cara_m2 = math.pi * ((medida_m / 2.0) ** 2)
                 texto_med = f"⌀ {int(medida_base_real)} cm"
@@ -218,13 +234,13 @@ def calcular_costo_accesorios_bd(
         # ---------------------------------------------------------------------
         elif "cubo" in id_str or "cubo" in nombre_acc.lower() or "conector" in id_str:
             es_fijo = True
-            costo_unitario = 25000.0 if diametro_tubo_base <= 1.0 else (45000.0 if diametro_tubo_base <= 2.0 else 60000.0)
+            costo_unitario = precio_bd if precio_bd > 0 else (25000.0 if diametro_tubo_base <= 1.0 else 45000.0)
             texto_med = ""
 
         # ---------------------------------------------------------------------
         # ACCESORIO: PERNOS Y SOLDADURA
         # ---------------------------------------------------------------------
-        elif "kit pernos" in nombre_acc.lower() or "soldadura" in nombre_acc.lower():
+        elif "kit pernos" in nombre_acc.lower() or "soldadura" in nombre_acc.lower() or "perno" in id_str:
             es_fijo = True
             costo_unitario = precio_bd if precio_bd > 0 else (18000.0 if "perno" in nombre_acc.lower() else 12000.0)
             texto_med = ""
@@ -251,7 +267,7 @@ def calcular_costo_accesorios_bd(
         # ---------------------------------------------------------------------
         else:
             es_fijo = True if precio_bd > 0 else False
-            costo_unitario = precio_bd if precio_bd > 0 else 15000.0
+            costo_unitario = precio_bd if precio_bd > 0 else float(det.get("precio") or det.get("costo") or 15000.0)
             texto_med = ""
 
         total_item = costo_unitario * cant

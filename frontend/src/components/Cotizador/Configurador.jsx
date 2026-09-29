@@ -6,6 +6,7 @@ import SelectorBujes from './configurador/SelectorBujes';
 import SelectorBrazosPoste from './configurador/SelectorBrazosPoste';
 import BaseAnclaje from './configurador/BaseAnclaje';
 import ListaAccesorios from './configurador/ListaAccesorios';
+import ConfiguradorTotem from './configurador/ConfiguradorTotem';
 
 const API_BASE_URL = "http://localhost:8000";
 
@@ -32,11 +33,10 @@ export default function Configurador({
   const [incluirPlatina, setIncluirPlatina] = useState((esGabinete || esBrazo) ? false : (params.incluirBase ?? true));
   const [platinaMedida, setPlatinaMedida] = useState(params.ladoBase || params.platinaLargo || 20);
   const [laminaAnclajeId, setLaminaAnclajeId] = useState(params.laminaAnclajeId || '');
+  const [ubicacion, setUbicacion] = useState(params.ubicacion || (esBrazo ? 'suspendido' : 'suelo'));
   
-  // Estado para almacenar los bujes obtenidos de la API
   const [bujes, setBujes] = useState([]);
 
-  // CONSULTA HTTP AL BACKEND DE FASTAPI
   useEffect(() => {
     fetch(`${API_BASE_URL}/api/bujes`)
       .then(res => {
@@ -51,9 +51,35 @@ export default function Configurador({
       .catch(err => console.error("Error al obtener los bujes:", err));
   }, []);
 
-  // CÁLCULO DINÁMICO DE UNIDADES RACK (RU)
-  const MARGEN_ESTRUCTURA_CM = 10;
+  // Sincronizar ubicación inicial hacia el visor si aún no está definida en params
+  useEffect(() => {
+    if (!params.ubicacion) {
+      const ubicacionDefecto = esBrazo ? 'suspendido' : 'suelo';
+      setUbicacion(ubicacionDefecto);
+      setParams(prev => ({
+        ...prev,
+        ubicacion: ubicacionDefecto,
+        tipoUbicacion: ubicacionDefecto,
+        montaje: ubicacionDefecto,
+        suspendido: ubicacionDefecto === 'suspendido',
+        esSuspendido: ubicacionDefecto === 'suspendido'
+      }));
+    }
+  }, [categoriaSel]);
 
+  const cambiarUbicacion = (nuevaUbicacion) => {
+    setUbicacion(nuevaUbicacion);
+    setParams(prev => ({
+      ...prev,
+      ubicacion: nuevaUbicacion,
+      tipoUbicacion: nuevaUbicacion,
+      montaje: nuevaUbicacion,
+      suspendido: nuevaUbicacion === 'suspendido',
+      esSuspendido: nuevaUbicacion === 'suspendido'
+    }));
+  };
+
+  const MARGEN_ESTRUCTURA_CM = 10;
   const calcularRU = (altoCm) => {
     const cm = parseFloat(altoCm) || 0;
     const cmUtiles = cm - MARGEN_ESTRUCTURA_CM;
@@ -63,39 +89,66 @@ export default function Configurador({
 
   const unidadesRUCalculadas = esGabinete ? calcularRU(params.alto) : 0;
 
-  // FUNCIÓN PARA CAMBIAR DE CATEGORÍA Y RESETEAR FORMULARIO
+  // CAMBIO DE CATEGORÍA CON LIMPIEZA CONTROLADA
   const cambiarCategoria = (nuevaCat) => {
     if (nuevaCat === categoriaSel) return;
 
-    setCategoriaSel(nuevaCat);
+    const ubicacionNueva = nuevaCat === 'brazos' ? 'suspendido' : 'suelo';
+    const esNuevoTotem = nuevaCat === 'totems';
+    const laminaDefectoTotem = laminas[0]?.id ? String(laminas[0].id) : 'CR-16';
 
-    // Resetear estados locales
+    setCategoriaSel(nuevaCat);
     setTipoPuerta('normal');
     setCantidadesAcc({});
     setUsarPersonalizada(false);
     setIncluirPlatina(nuevaCat === 'gabinetes' || nuevaCat === 'brazos' ? false : true);
     setPlatinaMedida(20);
-    setLaminaAnclajeId('');
+    setLaminaAnclajeId(esNuevoTotem ? laminaDefectoTotem : '');
+    setUbicacion(ubicacionNueva);
 
-    // Resetear parámetros globales para la nueva categoría
     setParams({
       categoria: nuevaCat,
-      alto: '',
-      ancho: '',
-      fondo: '',
+      ubicacion: ubicacionNueva,
+      tipoUbicacion: ubicacionNueva,
+      montaje: ubicacionNueva,
+      suspendido: ubicacionNueva === 'suspendido',
+      esSuspendido: ubicacionNueva === 'suspendido',
+      alto: esNuevoTotem ? 150 : '',
+      ancho: esNuevoTotem ? 25 : '',
+      fondo: esNuevoTotem ? 15 : '',
+       ...(esNuevoTotem && {
+        alto_cm: 150,
+        ancho_cm: 25,
+        fondo_cm: 15,
+        tipoFrente: 'videoportero',
+        modulos: ['videoportero'],
+        viseraSuperior: true,
+        tapaRegistro: true,
+        anchoBase: 39,
+        fondoBase: 25,
+        paresCartelas: 2,
+        colorPintura: '#1e293b',
+        pintura: '#1e293b'
+      }),
       tramos: [],
       accesoriosSeleccionados: [],
       detallesAccesorios: {},
       cantidadesAcc: {},
+      bujesSeleccionados: [],
+      bujeInicialId: '',
+      bujeFinalId: '',
+      bujeBaseId: '',
+      bujePuntaId: '',
+      bujeInicial: null,
+      bujeFinal: null,
       incluirBase: nuevaCat === 'gabinetes' || nuevaCat === 'brazos' ? false : true,
       incluirPlatina: nuevaCat === 'gabinetes' || nuevaCat === 'brazos' ? false : true,
-      laminaId: '',
-      laminaAnclajeId: '',
+      laminaId: esNuevoTotem ? laminaDefectoTotem : '',
+      laminaAnclajeId: esNuevoTotem ? laminaDefectoTotem : '',
       tipoPinturaId: ''
     });
   };
 
-  // SINCRONIZACIÓN DE ESTADOS SIN REINICIAR AL AÑADIR
   useEffect(() => {
     if (params.cantidadesAcc && Object.keys(params.cantidadesAcc).length > 0) {
       setCantidadesAcc(params.cantidadesAcc);
@@ -104,12 +157,8 @@ export default function Configurador({
     if (params.usarPersonalizada !== undefined) setUsarPersonalizada(params.usarPersonalizada);
     if (params.platinaLargo || params.ladoBase) setPlatinaMedida(params.platinaLargo || params.ladoBase);
     if (params.laminaAnclajeId) setLaminaAnclajeId(params.laminaAnclajeId);
-
-    if (params.categoria && params.categoria !== categoriaSel) {
-      setCategoriaSel(params.categoria);
-      setIncluirPlatina((params.categoria === 'gabinetes' || params.categoria === 'brazos') ? false : (params.incluirBase ?? true));
-    }
-  }, [params.categoria]);
+    if (params.ubicacion && params.ubicacion !== ubicacion) setUbicacion(params.ubicacion);
+  }, [params]);
 
   const manejarCambioPlatina = (campo, valor) => {
     if (campo === 'incluir') {
@@ -162,6 +211,7 @@ export default function Configurador({
           ...prev,
           incluirBase: nuevoValor,
           incluirPlatina: nuevoValor,
+          formaBase: nuevoValor ? (prev.formaBase || 'Base Redonda') : 'Sin Base',
           accesoriosSeleccionados: [...nuevosAcc],
           detallesAccesorios: detallesActualizados,
           ...(!nuevoValor && { laminaAnclajeId: '' })
@@ -264,7 +314,7 @@ export default function Configurador({
       if (tieneTramoIncompleto) return false;
     }
 
-    if (!esGabinete && !esBrazo && incluirPlatina) {
+    if (!esGabinete && !esBrazo && !esTotem && incluirPlatina) {
       const tieneLaminaAnclaje = laminaAnclajeId || params.laminaAnclajeId;
       if (!tieneLaminaAnclaje) return false;
     }
@@ -277,56 +327,34 @@ export default function Configurador({
   const presionarAgregar = () => {
     if (!esFormularioValido) return;
 
+    // 1. Bujes seleccionados en selectores desplegables
+    const bujeInicialObj = bujes.find(b => String(b.id) === String(params.bujeInicialId)) || null;
+    const bujeFinalObj = bujes.find(b => String(b.id) === String(params.bujeFinalId)) || null;
+
+    // 2. Extraer IDs de accesorios manuales seleccionados
     const rawAccSeleccionados = params.accesoriosSeleccionados || [];
-    let accFiltrados = rawAccSeleccionados.filter(accItem => {
-      const accId = String(typeof accItem === 'object' ? accItem.id : accItem).toLowerCase();
-      return accId !== 'platina_base' && accId !== 'platina_anclaje';
+    
+    const accFiltrados = rawAccSeleccionados.filter(accItem => {
+      const accId = String(typeof accItem === 'object' ? (accItem.id || accItem.codigo) : accItem).toLowerCase();
+
+      const esBujeDesplegable = 
+        (params.bujeInicialId && accId === String(params.bujeInicialId).toLowerCase()) || 
+        (params.bujeFinalId && accId === String(params.bujeFinalId).toLowerCase());
+      
+      const esPlatinaBase = accId === 'platina_base' || accId === 'platina_anclaje';
+
+      if (esBujeDesplegable || esPlatinaBase) return false;
+      return true;
     });
 
-    const puertaSeleccionada = String(params.tipoPuerta || tipoPuerta || '').toLowerCase();
-
-    if (esGabinete && puertaSeleccionada.includes('vidrio')) {
-      const tienePuertaVidrio = accFiltrados.some(acc => {
-        const accId = String(typeof acc === 'object' ? acc.id : acc).toLowerCase();
-        return accId.includes('vidrio') || accId.includes('puerta_vidrio');
-      });
-
-      if (!tienePuertaVidrio) {
-        accFiltrados.push('puerta_vidrio');
-      }
-    } else if (esGabinete && puertaSeleccionada.includes('normal')) {
-      accFiltrados = accFiltrados.filter(acc => {
-        const accId = String(typeof acc === 'object' ? acc.id : acc).toLowerCase();
-        return !accId.includes('vidrio') && !accId.includes('puerta_vidrio');
-      });
-    }
-
+    // Mapeo limpio respetando cantidades y formatos
     const listaAcc = accFiltrados.map(accItem => {
       const accId = typeof accItem === 'object' ? accItem.id : accItem;
       const cant = cantidadesAcc[accId] || (typeof accItem === 'object' ? accItem.cantidad : 1) || 1;
       return { id: accId, cantidad: cant };
     });
 
-    const detallesActualizados = { ...(params.detallesAccesorios || {}) };
-
-    accFiltrados.forEach(accItem => {
-      const accId = typeof accItem === 'object' ? accItem.id : accItem;
-      const idStr = String(accId).toLowerCase();
-
-      if (idStr.includes('platina_guia') || idStr.includes('guia')) {
-        detallesActualizados[accId] = {
-          ...(detallesActualizados[accId] || {}),
-          ladoBase: medidaUsar,
-          dimensionBase: medidaUsar,
-          platinaLargo: medidaUsar,
-          platinaAncho: medidaUsar,
-          dimension: medidaUsar,
-          formaBase: params.formaBase || 'Base Redonda',
-          laminaId: detallesActualizados[accId]?.laminaId || laminaAnclajeId || params.laminaAnclajeId
-        };
-      }
-    });
-
+    // 3. Tramos
     const tramosLista = (params.tramos || []).map(t => {
       const tuboObj = tubos.find(tb => String(tb.id) === String(t.tuboId)) || {};
       return {
@@ -343,76 +371,42 @@ export default function Configurador({
       return acc + (val < 10 ? val * 100 : val);
     }, 0);
 
-    let altoCalculado = 0;
-    let anchoCalculado = 0;
-    let fondoCalculado = 0;
+    const altoCalculado = esGabinete || esTotem 
+      ? (parseFloat(params.alto) || 100) 
+      : (sumaTramos > 0 ? sumaTramos : (parseFloat(params.alto) || 150));
 
-    if (esGabinete || esTotem) {
-      altoCalculado = parseFloat(params.alto) || 100;
-      anchoCalculado = parseFloat(params.ancho) || 50;
-      fondoCalculado = parseFloat(params.fondo) || 30;
-    } else {
-      altoCalculado = sumaTramos > 0 ? sumaTramos : (parseFloat(params.alto) || 150);
-      anchoCalculado = parseFloat(params.ancho) || 0;
-      fondoCalculado = parseFloat(params.fondo) || 0;
-    }
+    // 4. Lista limpia de Bujes para el backend
+    const bujesSeleccionadosLimpios = [];
+    if (params.bujeInicialId) bujesSeleccionadosLimpios.push(params.bujeInicialId);
+    if (params.bujeFinalId) bujesSeleccionadosLimpios.push(params.bujeFinalId);
 
-    const idLamAnclaje = laminaAnclajeId || params.laminaAnclajeId;
-    const laminaAnclajeObj = laminas.find(l => String(l.id) === String(idLamAnclaje)) || {};
-
-    const baseAnclajeEnriquecida = (esGabinete || esBrazo) ? null : {
-      formaBase: params.formaBase || 'Base Redonda',
-      diametroBase: medidaUsar,
-      materialCalibre: laminaAnclajeObj.material ? `${laminaAnclajeObj.material} (${laminaAnclajeObj.calibre || ''})` : (params.materialCalibre || 'Lámina de Anclaje'),
-      cantidadPies: params.cantPieAmigo || 4,
-      altoCartela: params.altoPieAmigo || 10,
-      tipoPieAmigo: params.tipoPieAmigo || 'aleta'
-    };
-
-    const laminaPrincipalObj = laminas.find(l => String(l.id) === String(params.laminaId)) || {};
-    let textoCalibreEstructural = params.calibre || params.lamina || '';
-
-    if (esGabinete || esTotem) {
-      textoCalibreEstructural = laminaPrincipalObj.material ? `${laminaPrincipalObj.material} (${laminaPrincipalObj.calibre || ''})` : 'Lámina Industrial';
-    } else if (tramosLista.length > 0) {
-      textoCalibreEstructural = tramosLista.map(t => `${t.tuboNombre} ${t.calibre}`).join(' / ');
-    }
-
+    // 5. Payload Final perfectamente estructurado
     const payloadFinal = JSON.parse(JSON.stringify({
       ...params,
       cantidad: 1,
       categoria: categoriaSel,
-      tipoPuerta: params.tipoPuerta || tipoPuerta,
-      calibre: textoCalibreEstructural,
-      lamina: textoCalibreEstructural,
-      laminaId: params.laminaId || '',
+      ubicacion: ubicacion,
+      tipoUbicacion: ubicacion,
+      montaje: ubicacion,
+      suspendido: ubicacion === 'suspendido',
+      esSuspendido: ubicacion === 'suspendido',
       alto: altoCalculado,
       alto_cm: altoCalculado,
-      altoTotalCm: altoCalculado,
-      unidadesRU: unidadesRUCalculadas,
-      ancho: anchoCalculado,
-      ancho_cm: anchoCalculado,
-      fondo: fondoCalculado,
-      fondo_cm: fondoCalculado,
       tramos: tramosLista,
-      baseAnclaje: baseAnclajeEnriquecida,
-      incluirBase: (esGabinete || esBrazo) ? false : Boolean(incluirPlatina),
-      incluirPlatina: (esGabinete || esBrazo) ? false : Boolean(incluirPlatina),
-      ladoBase: (esGabinete || esBrazo) ? 0 : medidaUsar,
-      platinaLargo: (esGabinete || esBrazo) ? 0 : medidaUsar,
-      platinaAncho: (esGabinete || esBrazo) ? 0 : medidaUsar,
-      dimensionBase: (esGabinete || esBrazo) ? 0 : medidaUsar,
-      dimension: (esGabinete || esBrazo) ? 0 : medidaUsar,
-      formaBase: params.formaBase || 'Base Redonda',
-      usarPieAmigo: (esGabinete || esBrazo) ? false : (params.usarPieAmigo ?? true),
-      cantPieAmigo: params.cantPieAmigo || 4,
-      altoPieAmigo: params.altoPieAmigo || 10,
-      tipoPieAmigo: params.tipoPieAmigo || 'aleta',
-      usarPersonalizada: usarPersonalizada,
-      laminaAnclajeId: idLamAnclaje,
-      accesoriosSeleccionados: accFiltrados,
-      detallesAccesorios: detallesActualizados,
-      accesorios_lista: listaAcc
+      cantidadesAcc: cantidadesAcc,
+      bujeInicial: bujeInicialObj ? {
+        id: bujeInicialObj.id,
+        nombre: bujeInicialObj.nombre || bujeInicialObj.descripcion,
+        precio: parseFloat(bujeInicialObj.precio || 0)
+      } : null,
+      bujeFinal: bujeFinalObj ? {
+        id: bujeFinalObj.id,
+        nombre: bujeFinalObj.nombre || bujeFinalObj.descripcion,
+        precio: parseFloat(bujeFinalObj.precio || 0)
+      } : null,
+      accesoriosSeleccionados: accFiltrados.map(a => typeof a === 'object' ? a.id : a),
+      accesorios_lista: listaAcc,
+      bujesSeleccionados: bujesSeleccionadosLimpios
     }));
 
     handleAgregar(payloadFinal);
@@ -420,7 +414,6 @@ export default function Configurador({
 
   return (
     <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-4 text-xs shadow-sm">
-      {/* Selector de Categorías */}
       <div className="grid grid-cols-4 gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
         {['totems', 'postes', 'brazos', 'gabinetes'].map(cat => (
           <button
@@ -437,146 +430,175 @@ export default function Configurador({
         ))}
       </div>
 
-      {/* Sección Material Base */}
-      <div className="space-y-3">
-        <span className="font-bold text-slate-500 uppercase text-[10px] tracking-wider border-b border-slate-100 pb-1.5 block">
-          MATERIAL BASE ({categoriaSel})
-        </span>
-
-        {(esTotem || esGabinete) && (
-          <>
-            <div>
-              <label className="text-[11px] font-medium text-slate-700 block mb-1">Tipo de Lámina:</label>
-              <select 
-                value={params.laminaId || ''} 
-                onChange={e => setParams(prev => ({ ...prev, laminaId: e.target.value }))}
-                className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-slate-800 outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-medium"
+      {!esTotem && (
+        <div className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-xl p-2">
+          <span className="text-[11px] font-semibold text-slate-600">Ubicación / Montaje:</span>
+          <div className="grid grid-cols-2 gap-1 bg-slate-200/70 p-0.5 rounded-lg">
+            {[
+              { id: 'suelo', label: 'A Suelo' },
+              { id: 'suspendido', label: 'Suspendido' }
+            ].map(op => (
+              <button
+                key={op.id}
+                type="button"
+                onClick={() => cambiarUbicacion(op.id)}
+                className={`px-3 py-1 rounded-md text-[11px] font-semibold transition ${
+                  ubicacion === op.id
+                    ? 'bg-white text-blue-600 shadow-sm'
+                    : 'text-slate-600 hover:text-slate-800'
+                }`}
               >
-                <option value="">-- Selecciona Lámina --</option>
-                {laminas.filter(l => l.categorias?.includes(categoriaSel)).map(l => (
-                  <option key={l.id} value={l.id}>{l.material} ({l.calibre})</option>
-                ))}
-              </select>
-            </div>
-            
-            <div className="grid grid-cols-3 gap-2">
-              <div>
-                <div className="flex justify-between items-center mb-1">
-                  <label className="text-slate-600 text-[11px] font-medium">Alto (cm)</label>
-                  {esGabinete && (
-                    <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-1 rounded border border-blue-200">
-                      ~{unidadesRUCalculadas} RU
-                    </span>
-                  )}
-                </div>
-                <input 
-                  type="number" 
-                  placeholder="0"
-                  value={params.alto || ''} 
-                  onChange={e => setParams(prev => ({ ...prev, alto: e.target.value }))} 
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 text-slate-800 font-mono text-center outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" 
-                />
-              </div>
-              <div>
-                <label className="text-slate-600 block mb-1 text-[11px] font-medium">Ancho (cm)</label>
-                <input 
-                  type="number" 
-                  placeholder="0"
-                  value={params.ancho || ''} 
-                  onChange={e => setParams(prev => ({ ...prev, ancho: e.target.value }))} 
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 text-slate-800 font-mono text-center outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" 
-                />
-              </div>
-              <div>
-                <label className="text-slate-600 block mb-1 text-[11px] font-medium">Fondo (cm)</label>
-                <input 
-                  type="number" 
-                  placeholder="0"
-                  value={params.fondo || ''} 
-                  onChange={e => setParams(prev => ({ ...prev, fondo: e.target.value }))} 
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 text-slate-800 font-mono text-center outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" 
-                />
-              </div>
-            </div>
-          </>
-        )}
-
-        {(esPoste || esBrazo) && (
-          <div className="space-y-4">
-            <SelectorTramos 
-              params={params} 
-              setParams={setParams} 
-              tubos={tubos} 
-              categoriaSel={categoriaSel} 
-            />
-
-            {/* SECCIÓN DE BUJES Y ACOPLES: SOLO SE RENDERIZA EN BRAZOS */}
-            {esBrazo && (
-              <SelectorBujes
-                params={params}
-                setParams={setParams}
-                bujes={bujes}
-              />
-            )}
-
-            {/* SECCIÓN DE BRAZOS EN POSTES */}
-            {esPoste && (
-              <SelectorBrazosPoste
-                params={params}
-                setParams={setParams}
-                accesorios={accesorios}
-              />
-            )}
+                {op.label}
+              </button>
+            ))}
           </div>
-        )}
-      </div>
-
-      <SelectorPintura 
-        params={params} 
-        setParams={setParams} 
-        pinturas={pinturas} 
-        category={categoriaSel}
-      />
-
-      {/* Solo se muestra Platina si NO es Gabinete NI tampoco Brazo */}
-      {!esGabinete && !esBrazo && (
-        <div className="space-y-2 pt-2 border-t border-slate-100">
-          <label className="flex items-center gap-2 cursor-pointer text-slate-700 font-medium select-none">
-            <input 
-              type="checkbox" 
-              checked={incluirPlatina} 
-              onChange={(e) => manejarCambioPlatina('incluir', e.target.checked)}
-              className="w-4 h-4 rounded border-slate-300 bg-slate-100 text-blue-600 focus:ring-0" 
-            />
-            <span>Incluir Base / Platina de Anclaje</span>
-          </label>
-
-          {incluirPlatina && (
-            <BaseAnclaje 
-              requiereAnclaje={true}
-              usarPersonalizada={usarPersonalizada}
-              setUsarPersonalizada={(val) => {
-                setUsarPersonalizada(val);
-                setParams(prev => ({ ...prev, usarPersonalizada: val }));
-              }}
-              categoriaSel={categoriaSel}
-              params={params}
-              setParams={setParams}
-              recPlatina={recPlatina}
-              platinaLargo={platinaMedida}
-              setPlatinaLargo={(val) => manejarCambioPlatina('medida', val)}
-              laminaAnclajeId={laminaAnclajeId}
-              setLaminaAnclajeId={(val) => {
-                setLaminaAnclajeId(val);
-                setParams(prev => ({ ...prev, laminaAnclajeId: val }));
-              }}
-              laminas={laminas}
-            />
-          )}
         </div>
       )}
 
-      {/* ListaAccesorios se encarga de gestionar la puerta y los accesorios de gabinetes */}
+      {esTotem ? (
+        <ConfiguradorTotem
+          params={params}
+          setParams={setParams}
+          laminas={laminas}
+          pinturas={pinturas}
+        />
+      ) : (
+        <>
+          <div className="space-y-3">
+            <span className="font-bold text-slate-500 uppercase text-[10px] tracking-wider border-b border-slate-100 pb-1.5 block">
+              MATERIAL BASE ({categoriaSel})
+            </span>
+
+            {esGabinete && (
+              <>
+                <div>
+                  <label className="text-[11px] font-medium text-slate-700 block mb-1">Tipo de Lámina:</label>
+                  <select 
+                    value={params.laminaId || ''} 
+                    onChange={e => setParams(prev => ({ ...prev, laminaId: e.target.value }))}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-slate-800 outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-medium"
+                  >
+                    <option value="">-- Selecciona Lámina --</option>
+                    {laminas.filter(l => l.categorias?.includes(categoriaSel)).map(l => (
+                      <option key={l.id} value={l.id}>{l.material} ({l.calibre})</option>
+                    ))}
+                  </select>
+                </div>
+                
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="text-slate-600 text-[11px] font-medium">Alto (cm)</label>
+                      <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-1 rounded border border-blue-200">
+                        ~{unidadesRUCalculadas} RU
+                      </span>
+                    </div>
+                    <input 
+                      type="number" 
+                      placeholder="0"
+                      value={params.alto || ''} 
+                      onChange={e => setParams(prev => ({ ...prev, alto: e.target.value }))} 
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 text-slate-800 font-mono text-center outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" 
+                    />
+                  </div>
+                  <div>
+                    <label className="text-slate-600 block mb-1 text-[11px] font-medium">Ancho (cm)</label>
+                    <input 
+                      type="number" 
+                      placeholder="0"
+                      value={params.ancho || ''} 
+                      onChange={e => setParams(prev => ({ ...prev, ancho: e.target.value }))} 
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 text-slate-800 font-mono text-center outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" 
+                    />
+                  </div>
+                  <div>
+                    <label className="text-slate-600 block mb-1 text-[11px] font-medium">Fondo (cm)</label>
+                    <input 
+                      type="number" 
+                      placeholder="0"
+                      value={params.fondo || ''} 
+                      onChange={e => setParams(prev => ({ ...prev, fondo: e.target.value }))} 
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 text-slate-800 font-mono text-center outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" 
+                    />
+                  </div>
+                </div>
+              </>
+            )}
+
+            {(esPoste || esBrazo) && (
+              <div className="space-y-4">
+                <SelectorTramos 
+                  params={params} 
+                  setParams={setParams} 
+                  tubos={tubos} 
+                  categoriaSel={categoriaSel} 
+                />
+
+                {esBrazo && (
+                  <SelectorBujes
+                    params={params}
+                    setParams={setParams}
+                    bujes={bujes}
+                  />
+                )}
+
+                {esPoste && (
+                  <SelectorBrazosPoste
+                    params={params}
+                    setParams={setParams}
+                    accesorios={accesorios}
+                  />
+                )}
+              </div>
+            )}
+          </div>
+
+          <SelectorPintura 
+            params={params} 
+            setParams={setParams} 
+            pinturas={pinturas} 
+            category={categoriaSel}
+          />
+
+          {!esGabinete && !esBrazo && (
+            <div className="space-y-2 pt-2 border-t border-slate-100">
+              <label className="flex items-center gap-2 cursor-pointer text-slate-700 font-medium select-none">
+                <input 
+                  type="checkbox" 
+                  checked={incluirPlatina} 
+                  onChange={(e) => manejarCambioPlatina('incluir', e.target.checked)}
+                  className="w-4 h-4 rounded border-slate-300 bg-slate-100 text-blue-600 focus:ring-0" 
+                />
+                <span>Incluir Base / Platina de Anclaje</span>
+              </label>
+
+              {incluirPlatina && (
+                <BaseAnclaje 
+                  requiereAnclaje={true}
+                  usarPersonalizada={usarPersonalizada}
+                  setUsarPersonalizada={(val) => {
+                    setUsarPersonalizada(val);
+                    setParams(prev => ({ ...prev, usarPersonalizada: val }));
+                  }}
+                  categoriaSel={categoriaSel}
+                  params={params}
+                  setParams={setParams}
+                  recPlatina={recPlatina}
+                  platinaLargo={platinaMedida}
+                  setPlatinaLargo={(val) => manejarCambioPlatina('medida', val)}
+                  laminaAnclajeId={laminaAnclajeId}
+                  setLaminaAnclajeId={(val) => {
+                    setLaminaAnclajeId(val);
+                    setParams(prev => ({ ...prev, laminaAnclajeId: val }));
+                  }}
+                  laminas={laminas}
+                />
+              )}
+            </div>
+          )}
+        </>
+      )}
+
       <ListaAccesorios 
         accesorios={accesorios}
         categoriaSel={categoriaSel}
@@ -588,7 +610,6 @@ export default function Configurador({
         tubos={tubos}
       />
 
-      {/* Botón de Acción */}
       <div className="pt-2">
         <button
           onClick={presionarAgregar}

@@ -1,10 +1,12 @@
 import math
+import models
 from sqlalchemy.orm import Session
 
 from pricing_laminas import obtener_precio_cm2_lamina
 from pricing_tubos import calcular_area_postes
 from pricing_accesorios import calcular_costo_accesorios_bd
 from pricing_complementos import calcular_costo_complementos_bd
+from pricing_totems import calcular_precio_totem
 
 def calcular_item_cotizacion(categoria: str, params: dict, nivel_precio: int, db: Session) -> dict:
     
@@ -15,11 +17,25 @@ def calcular_item_cotizacion(categoria: str, params: dict, nivel_precio: int, db
     diametro_tubo_principal = 2.0
 
     lamina_id = params.get("laminaId") or params.get("laminaAnclajeId") or params.get("lamina_id")
-    cat_lower = (categoria or "").lower()
+    cat_lower = (categoria or "").lower().strip()
+    cat_param = params.get("categoria") or params.get("categoriaSel") or params.get("tipo") or ""
+    cat_limpia = f"{categoria or ''} {cat_param}".lower().strip()
+
+    if cat_lower in ["totems", "totem"] or "totem" in cat_limpia:
+        params_totem = {**params, "nivelPrecio": nivel_precio}
+        return calcular_precio_totem(params_totem, db)
+
+    es_brazo = "brazo" in cat_limpia or "brazos" in cat_limpia
 
     cubicaje_m3 = 0.0
 
-    if cat_lower in ["postes", "brazos"]:
+    # PURGA DE CLAVES DE COMPLEMENTOS PARÁSITOS EN BRAZOS
+    if es_brazo:
+        params.pop("brazosMontados", None)
+        params.pop("brazos_lista", None)
+        params.pop("complementos", None)
+
+    if cat_lower in ["postes", "brazos"] or es_brazo:
         tramos = params.get("tramos", [])
         area_tubo_m2, costo_material, diametro_tubo_principal = calcular_area_postes(tramos, db)
         medidas_texto = f"{int(params.get('alto', 150))} cm"
@@ -41,40 +57,111 @@ def calcular_item_cotizacion(categoria: str, params: dict, nivel_precio: int, db
         costo_material = area_gabinete_cm2 * precio_cm2
         medidas_texto = f"{int(alto_cm)} x {int(ancho_cm)} x {int(fondo_cm)} cm"
 
-    # 1. Obtener accesorios convencionales seleccionados
-    acc_ids = params.get("accesoriosSeleccionados") or params.get("accesorios_lista") or []
-    cantidades_acc = params.get("cantidadesAcc", {})
-    detalles_acc = params.get("detallesAccesorios", {})
+    # -------------------------------------------------------------------------
+    # 1. EXTRAER Y FILTRAR ACCESORIOS Y BUJES EXPLICITAMENTE
+    # -------------------------------------------------------------------------
+    valores_invalidos = ["", "none", "null", "sin_buje", "sin buje", "ninguno", "0", "undefined", None]
     
+    # 1.1 Leer accesorios manuales
+    raw_acc_ids = list(params.get("accesoriosSeleccionados") or params.get("accesorios_lista") or [])
+    acc_ids_manuales = []
+    for a in raw_acc_ids:
+        a_id = a.get("id") if isinstance(a, dict) else a
+        if a_id and str(a_id).strip().lower() not in valores_invalidos:
+            if a_id not in acc_ids_manuales:
+                acc_ids_manuales.append(a_id)
+
+    # 1.2 Extraer bujes
+    bujes_detectados = []
+    claves_bujes = [
+        "bujeInicialId", "bujeFinalId", "bujeBaseId", "bujePuntaId", 
+        "bujeBase", "bujeFinal", "bujeInicial", "buje_inicial_id", "buje_final_id"
+    ]
+
+    for k in claves_bujes:
+        val_b = params.get(k)
+        if isinstance(val_b, dict):
+            val_b = val_b.get("id") or val_b.get("nombre")
+        if val_b and str(val_b).strip().lower() not in valores_invalidos:
+            if val_b not in bujes_detectados:
+                bujes_detectados.append(val_b)
+
+    bujes_list_raw = params.get("bujesSeleccionados") or []
+    for item_b in bujes_list_raw:
+        item_id = item_b.get("id") if isinstance(item_b, dict) else item_b
+        if item_id and str(item_id).strip().lower() not in valores_invalidos:
+            if item_id not in bujes_detectados:
+                bujes_detectados.append(item_id)
+
+    cantidades_acc = dict(params.get("cantidadesAcc", {}))
+    detalles_acc = dict(params.get("detallesAccesorios", {}))
+
+    # A. Calcular Accesorios desde la tabla 'accesorios'
     lista_acc_base, area_acc_m2 = calcular_costo_accesorios_bd(
-        acc_ids, cantidades_acc, detalles_acc, lamina_id, db, diametro_tubo_principal, params
+        acc_ids_manuales, cantidades_acc, detalles_acc, lamina_id, db, diametro_tubo_principal, params
     )
 
-    # 2. Obtener complementos (Brazos PTZ/Rectos, Bujes, etc.)
-    lista_complementos_base, area_comp_m2 = calcular_costo_complementos_bd(params, db)
+    # B. CONSULTA DIRECTA DE BUJES (Tabla 'bujes')
+    lista_bujes_base = []
+    if bujes_detectados:
+        try:
+            bujes_db = db.query(models.Buje).filter(
+                (models.Buje.id.in_([b for b in bujes_detectados if str(b).isdigit()])) |
+                (models.Buje.nombre.in_([str(b) for b in bujes_detectados]))
+            ).all()
+            
+            for b in bujes_db:
+                # Lectura de precio segura contra errores de esquema
+                precio_b = getattr(b, 'precio', getattr(b, 'precio_venta', getattr(b, 'costo', 15000.0)))
+                lista_bujes_base.append({
+                    "id": f"buje_{b.id}",
+                    "nombre": f"Buje: {b.nombre}",
+                    "cantidad": 1,
+                    "costo_unitario": float(precio_b or 0.0),
+                    "total_item": float(precio_b or 0.0),
+                    "es_fijo": True
+                })
+        except Exception as err_bujes:
+            print(f"[Advertencia] Error al consultar bujes en BD: {err_bujes}")
 
-    # Sumar las áreas para el cálculo de pintura electrostática
+    # C. Complementos adicionales
+    if es_brazo:
+        lista_complementos_base, area_comp_m2 = [], 0.0
+    else:
+        lista_complementos_base, area_comp_m2 = calcular_costo_complementos_bd(params, db)
+
+    # D. Unificar componentes (SOLO UNA VEZ)
     area_acc_m2 += area_comp_m2
-
-    # Unificar la lista para aplicar márgenes comerciales
-    lista_todos_componentes = lista_acc_base + lista_complementos_base
+    lista_todos_componentes = lista_acc_base + lista_bujes_base + lista_complementos_base
 
     accesorios_venta = []
     costo_accesorios_total_venta = 0.0
 
     for item in lista_todos_componentes:
-        if item.get("es_fijo", False):
-            p_unit = round(item["costo_unitario"])
-            p_tot = round(item["total_item"])
+        nom_lower = str(item.get("nombre", "")).lower()
+        id_lower = str(item.get("id", "")).lower()
+        
+        # RESPETAR PRECIO FIJO EN BUJES, ROSITAS, BASES Y ACCESORIOS FIJOS
+        es_fijo_o_buje = (
+            item.get("es_fijo", False) or 
+            "buje" in nom_lower or "buje" in id_lower or 
+            "roseta" in nom_lower or "roseta" in id_lower or 
+            "base" in nom_lower or "escualizable" in nom_lower or
+            "cubo" in nom_lower or "soldadura" in nom_lower
+        )
+
+        if es_fijo_o_buje:
+            p_unit = round(item.get("costo_unitario", 0))
+            p_tot = round(item.get("total_item", 0))
         else:
-            p_unit = round(item["costo_unitario"] * factor_margen)
-            p_tot = round(item["total_item"] * factor_margen)
+            p_unit = round(item.get("costo_unitario", 0) * factor_margen)
+            p_tot = round(item.get("total_item", 0) * factor_margen)
 
         costo_accesorios_total_venta += p_tot
 
         accesorios_venta.append({
-            "id": item["id"],
-            "nombre": item["nombre"],
+            "id": item.get("id", "acc"),
+            "nombre": item.get("nombre", "Accesorio"),
             "cantidad": item.get("cantidad", 1),
             "precioUnitario": p_unit,
             "precio": p_tot,
@@ -85,8 +172,8 @@ def calcular_item_cotizacion(categoria: str, params: dict, nivel_precio: int, db
     area_base_m2 = 0.0
     obj_base = params.get("baseAnclaje") if isinstance(params.get("baseAnclaje"), dict) else params.get("platinaBase", {})
 
-    if cat_lower in ["gabinetes", "totems"]:
-        incluye_base = False
+    if cat_lower in ["gabinetes", "totems", "brazos"] or es_brazo:
+        incluye_base = bool(params.get("incluirBase") is True or params.get("incluirPlatina") is True or obj_base.get("incluir") is True)
     else:
         incluye_base = bool(params.get("incluirBase") or params.get("incluirPlatina") or obj_base.get("incluir", False))
 
@@ -189,10 +276,6 @@ def calcular_item_cotizacion(categoria: str, params: dict, nivel_precio: int, db
     rendimiento = float(params.get("rendimientoPinturaKgM2", 6.0) or 6.0)
     costo_pintura_m2 = precio_pintura_kg / rendimiento if rendimiento > 0 else 0
 
-    cat_param = params.get("categoria") or params.get("categoriaSel") or params.get("tipo") or ""
-    cat_limpia = f"{categoria or ''} {cat_param}".lower().strip()
-
-    es_brazo = "brazo" in cat_limpia or "brazos" in cat_limpia
     es_gabinete = "gabinete" in cat_limpia or "gabinetes" in cat_limpia
     es_poste = (
         any(k in cat_limpia for k in ["poste", "postes"]) or
@@ -214,7 +297,6 @@ def calcular_item_cotizacion(categoria: str, params: dict, nivel_precio: int, db
     costo_material_venta = round(costo_material * factor_margen)
     costo_pintura_venta = round(costo_pintura_base * factor_margen)
 
-    # Si es gabinete y no supera el umbral de cubicaje, se resta el recargo fijo directamente en el valor de venta
     if es_gabinete:
         UMBRAL_CUBICAJE_M3 = 0.08
         if cubicaje_m3 < UMBRAL_CUBICAJE_M3:

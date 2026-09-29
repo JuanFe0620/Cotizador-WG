@@ -2,7 +2,7 @@ import * as THREE from 'three';
 
 export function construirPuerta({ loader, params, matGenerico, scene }) {
   const { 
-    tipoPuerta = 'vidrio', 
+    tipoPuerta = 'normal', // Valor por defecto Normal
     acabadoPuerta = 'romo', 
     alto = 100, 
     ancho = 60, 
@@ -16,10 +16,10 @@ export function construirPuerta({ loader, params, matGenerico, scene }) {
   let altoClave = '90';
   let altoBaseModelo = 90; // Alto de referencia en cm del archivo .glb
 
-  if (altoCm >= 135) {
+  if (altoCm >= 121) {
     altoClave = '150';
     altoBaseModelo = 150;
-  } else if (altoCm >= 105) {
+  } else if (altoCm >= 91) {
     altoClave = '120';
     altoBaseModelo = 120;
   }
@@ -29,7 +29,8 @@ export function construirPuerta({ loader, params, matGenerico, scene }) {
     const sufijoPunta = acabadoPuerta === 'punta' ? 'Punta' : '';
     nombreArchivo = `PuertaVidrio${sufijoPunta} ${altoClave}x60x60.glb`;
   } else if (tipoPuerta === 'normal') {
-    nombreArchivo = `PuertaNormal ${altoClave}x60x60.glb`;
+    // Coincide exactamente con los nombres de tus nuevos archivos .glb
+    nombreArchivo = `Puerta ${altoClave}x60x60.glb`;
   } else if (tipoPuerta === 'doble') {
     nombreArchivo = `PuertaDoble ${altoClave}x60x60.glb`;
   }

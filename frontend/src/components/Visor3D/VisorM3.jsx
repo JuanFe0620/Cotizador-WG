@@ -12,6 +12,7 @@ import { construirCotas } from './visor/builders/cotasBuilder';
 import { construirGabinete } from './visor/builders/gabineteBuilder';
 import { buildBrazo } from './visor/builders/brazosBuilder';
 import { construirPuerta } from './visor/builders/puertasBuilder';
+import { buildTotem } from './visor/builders/totemBuilder';
 
 const VisorM3 = forwardRef(({ 
   categoriaSel = 'postes', 
@@ -56,6 +57,7 @@ const VisorM3 = forwardRef(({
     const catOriginal = String(paramsTarget?.categoria || paramsTarget?.categoriaSel || categoriaSel || '').toLowerCase();
     const esGabinete = catOriginal.includes('gabinete') || catOriginal.includes('gabinetes');
     const esBrazo = catOriginal.includes('brazo') || catOriginal.includes('brazos');
+    const esTotem = catOriginal.includes('totem') || catOriginal.includes('totems') || catOriginal.includes('tótem');
 
     // 3. Normalización de Parámetros y detección de ROLADA / PTZ
     const listaAccSel = paramsTarget?.accesoriosSeleccionados || (paramsTarget?.accesorios_lista || []).map(a => a.id) || [];
@@ -67,9 +69,9 @@ const VisorM3 = forwardRef(({
 
     const paramsNormalizados = {
       ...paramsTarget,
-      alto: paramsTarget?.alto || paramsTarget?.detalles?.alto || paramsTarget?.alto_cm || 100,
-      ancho: paramsTarget?.ancho || paramsTarget?.detalles?.ancho || paramsTarget?.ancho_cm || 50,
-      fondo: paramsTarget?.fondo || paramsTarget?.detalles?.fondo || paramsTarget?.fondo_cm || 30,
+      alto: paramsTarget?.alto || paramsTarget?.detalles?.alto || paramsTarget?.alto_cm || (esTotem ? 150 : 100),
+      ancho: paramsTarget?.ancho || paramsTarget?.detalles?.ancho || paramsTarget?.ancho_cm || (esTotem ? 25 : 50),
+      fondo: paramsTarget?.fondo || paramsTarget?.detalles?.fondo || paramsTarget?.fondo_cm || (esTotem ? 15 : 30),
       tramos: paramsTarget?.tramos || paramsTarget?.detalles?.tramos || [],
       accesoriosSeleccionados: listaAccSel,
       esRolada: tieneRolada
@@ -111,20 +113,69 @@ const VisorM3 = forwardRef(({
         const altoEnMetros = (altoRef < 10 ? altoRef * 100 : altoRef) / 100;
         controlsRef.current.target.set(0.15, altoEnMetros / 2, 0);
       }
-    } else if (esBrazo) {
-      const bujeId = paramsCompletos.bujeInicial || paramsCompletos.bujeInicialId || paramsCompletos.bujeBase;
-      
-      const bujeEncontrado = accesorios.find(a => 
-        String(a.id) === String(bujeId) || 
-        String(a.nombre).toLowerCase() === String(bujeId).toLowerCase()
-      );
+    } else if (esTotem) {
+      const totemMesh = buildTotem(paramsCompletos, loader, matGenerico);
+      scene.add(totemMesh);
 
-      const paramsConBuje = {
+      if (controlsRef.current) {
+        const altoEnMetros = totemMesh?.userData?.altoTotemM || ((paramsNormalizados.alto || 150) / 100);
+        controlsRef.current.target.set(0, altoEnMetros / 2, 0);
+      }
+    } else if (esBrazo) {
+      // RENDERIZADO DE BRAZOS INDEPENDIENTES
+      const valBujeInicial = 
+        paramsCompletos.bujeInicial ?? 
+        paramsCompletos.buje_inicial ?? 
+        paramsCompletos.bujeInicialId ?? 
+        paramsCompletos.buje_inicial_id ?? 
+        paramsCompletos.conexionInicial ?? 
+        paramsCompletos.conexion_inicial ?? 
+        paramsCompletos.bujeBase ?? 
+        paramsCompletos.buje_base ?? 
+        paramsCompletos.base ?? 
+        paramsCompletos.detalles?.bujeInicial ?? 
+        paramsCompletos.detalles?.buje_inicial ?? 
+        paramsCompletos.detalles?.conexion_inicial ?? 
+        paramsCompletos.detalles?.base ?? 
+        '';
+
+      const valBujeFinal = 
+        paramsCompletos.bujeFinal ?? 
+        paramsCompletos.buje_final ?? 
+        paramsCompletos.bujeFinalId ?? 
+        paramsCompletos.buje_final_id ?? 
+        paramsCompletos.conexionFinal ?? 
+        paramsCompletos.conexion_final ?? 
+        paramsCompletos.bujePunta ?? 
+        paramsCompletos.buje_punta ?? 
+        paramsCompletos.punta ?? 
+        paramsCompletos.detalles?.bujeFinal ?? 
+        paramsCompletos.detalles?.buje_final ?? 
+        paramsCompletos.detalles?.conexion_final ?? 
+        paramsCompletos.detalles?.punta ?? 
+        '';
+
+      const objBujeInicial = (typeof valBujeInicial === 'object' && valBujeInicial !== null)
+        ? valBujeInicial
+        : (accesorios.find(a => 
+            String(a.id) === String(valBujeInicial) || 
+            String(a.nombre || '').toLowerCase() === String(valBujeInicial).toLowerCase()
+          ) || valBujeInicial);
+
+      const objBujeFinal = (typeof valBujeFinal === 'object' && valBujeFinal !== null)
+        ? valBujeFinal
+        : (accesorios.find(a => 
+            String(a.id) === String(valBujeFinal) || 
+            String(a.nombre || '').toLowerCase() === String(valBujeFinal).toLowerCase()
+          ) || valBujeFinal);
+
+      const paramsBrazo = {
         ...paramsCompletos,
-        objetoBujeInicial: bujeEncontrado
+        bujeInicial: objBujeInicial,
+        bujeFinal: objBujeFinal
       };
 
-      const brazoMesh = buildBrazo(paramsConBuje, tubos, accesorios, loader, scene);
+      const brazoMesh = buildBrazo(paramsBrazo, tubos, accesorios, loader);
       scene.add(brazoMesh);
 
       const bbox = new THREE.Box3().setFromObject(brazoMesh);
@@ -149,7 +200,6 @@ const VisorM3 = forwardRef(({
       const textoTipoTubo = (primerTramo?.tipo || primerTramo?.forma || tuboObj0?.tipo || paramsNormalizados?.tipoTubo || '').toLowerCase();
       const esCuadrado = textoTipoTubo.includes('cuad') || paramsNormalizados?.esCuadrado === true;
 
-      // Base
       construirBases({ 
         loader, 
         laminas, 
@@ -160,7 +210,6 @@ const VisorM3 = forwardRef(({
         params: paramsNormalizados 
       });
 
-      // Accesorios
       paramsNormalizados.accesoriosSeleccionados.forEach((accId) => {
         const accObj = accesorios.find(a => String(a.id) === String(accId));
         const nombreAcc = (accObj?.nombre || '').toLowerCase();
@@ -209,17 +258,14 @@ const VisorM3 = forwardRef(({
         }
       });
 
-      // RENDERIZADO DE BRAZOS MONTAJES EN POSTE
       const listaBrazos = paramsNormalizados.brazos || paramsNormalizados.brazosAdicionales || [];
       if (listaBrazos.length > 0) {
-        // 1. Extraer altura de forma segura ANTES de la carga asíncrona
         let alturaCuboM = 1.5;
         if (Array.isArray(limitesTramos) && limitesTramos.length > 0 && limitesTramos[0]?.yMax) {
           alturaCuboM = limitesTramos[0].yMax;
         }
 
-        // 2. Extraer radio del poste de forma segura (ancho dinámico)
-        let radioPosteMetros = 0.038; // 3.8 cm por defecto (tubo de 3")
+        let radioPosteMetros = 0.038;
         try {
           const tramo0 = paramsNormalizados?.tramos?.[0] || {};
           if (typeof obtenerPulgadasTubo === 'function') {
@@ -230,7 +276,6 @@ const VisorM3 = forwardRef(({
           console.warn('No se pudo calcular el radio exacto, usando default:', e);
         }
 
-        // Offset dinámico: Radio del tubo + espesor de la pared del cubo (~1.5 cm)
         const offsetExterior = radioPosteMetros + 0.015;
 
         listaBrazos.forEach((brazo) => {
@@ -240,14 +285,13 @@ const VisorM3 = forwardRef(({
           }
 
           loader.load(
-            nombreArchivo,
+            encodeURI(nombreArchivo),
             (gltf) => {
               const brazoMesh = gltf.scene;
 
               const rotDeg = parseFloat(brazo.rotacionDeg ?? brazo.rotacion ?? 0);
               const rotacionRad = (rotDeg * Math.PI) / 180;
 
-              // Posicionar a la altura del cubo y aplicar offset según el ancho del poste
               brazoMesh.position.set(0, alturaCuboM, 0);
               brazoMesh.rotation.y = rotacionRad;
               brazoMesh.translateX(offsetExterior);
@@ -268,7 +312,6 @@ const VisorM3 = forwardRef(({
         });
       }
 
-      // Cotas
       construirCotas({
         limitesTramos,
         scene,

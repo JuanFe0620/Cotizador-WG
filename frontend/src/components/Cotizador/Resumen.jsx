@@ -10,6 +10,7 @@ export default function Resumen({ items = [], setItems, consecutivo = 'COT-2001'
   const [nuevoCliente, setNuevoCliente] = useState({ nit_cedula: '', nombre: '', telefono: '', direccion: '' });
   const [generandoPdf, setGenerandoPdf] = useState(false);
   const [guardandoCliente, setGuardandoCliente] = useState(false);
+  const [notas, setNotas] = useState('');
 
   useEffect(() => {
     let active = true;
@@ -42,7 +43,7 @@ export default function Resumen({ items = [], setItems, consecutivo = 'COT-2001'
     });
   };
 
-  const obtenerValoresComerciales = useCallback((item) => {
+const obtenerValoresComerciales = useCallback((item) => {
     const cantItem = Math.max(1, parseInt(item.cantidad || item.detalles?.cantidad || 1, 10));
 
     const parseSeguro = (val) => {
@@ -50,41 +51,29 @@ export default function Resumen({ items = [], setItems, consecutivo = 'COT-2001'
       return isNaN(num) ? 0 : num;
     };
 
-    // 1. Accesorios Convencionales
-    const accesorios = item.accesoriosLista || item.accesorios_lista || item.detalles?.accesorios || [];
+    // 1. Obtener lista limpia enviada desde la API
+    const rawAccs = item.accesoriosLista || item.accesorios_lista || item.detalles?.accesoriosLista || [];
+    
+    const accesorios = rawAccs.filter(a => {
+      if (!a) return false;
+      const nom = String(a.nombre || a.descripcion || '').toLowerCase();
+      const idStr = String(a.id || '').toLowerCase();
+      if (item.categoria === 'BRAZOS' || item.categoria === 'BRAZO') {
+        if ((nom.includes('cubo') || idStr.includes('cubo') || nom.includes('perno') || idStr.includes('perno')) && !a.seleccionadoExplicitamente) {
+          return false;
+        }
+      }
+      return true;
+    });
+
+    // Suma exacta de lo que viene en la lista de accesorios (Bujes + Bases + Accesorios manuales)
     const sumaAccesoriosLista = accesorios.reduce((acc, a) => {
       const cant = Number(a.cantidad || 1);
-      let precioUnitario = Number(a.precioUnitario ?? a.precio_calculado ?? a.costo ?? a.precio ?? 0);
-
-      if (precioUnitario === 0 && a.nombre) {
-        const nom = a.nombre.toLowerCase();
-        if (nom.includes('cubo')) precioUnitario = 15000;
-        else if (nom.includes('pernos')) precioUnitario = 18000;
-        else if (nom.includes('guía') || nom.includes('guia')) precioUnitario = 12000;
-        else if (nom.includes('corona')) precioUnitario = 19893;
-        else if (nom.includes('base')) precioUnitario = 57300;
-      }
-
+      const precioUnitario = Number(a.precioUnitario ?? a.precio_calculado ?? a.costo ?? a.precio ?? a.total ?? 0);
       return acc + (precioUnitario * cant);
     }, 0);
 
-    // 2. Modelo Independiente: Brazo / BrazoGuardado
-    const precioBrazo = parseSeguro(
-      item.brazoPrecio ?? 
-      item.brazo?.precio ?? 
-      item.brazo?.costo_total ?? 
-      item.detalles?.brazo?.precio ?? 
-      item.costoBrazo ?? 
-      0
-    );
-
-    // 3. Modelo Independiente: Bujes
-    const bujeInicialPrecio = parseSeguro(item.bujeInicial?.precio ?? item.detalles?.bujeInicial?.precio ?? 0);
-    const bujeFinalPrecio = parseSeguro(item.bujeFinal?.precio ?? item.detalles?.bujeFinal?.precio ?? 0);
-    const bujesDirectosPrecio = parseSeguro(item.costoBujes ?? item.precioBujes ?? 0);
-    const sumaBujes = bujeInicialPrecio + bujeFinalPrecio + bujesDirectosPrecio;
-
-    // 4. Precios Base Estructura / Pintura
+    // 2. Precios Base Estructura / Pintura
     const baseEstructura = parseSeguro(
       item.costoEstructura ?? item.costo_lamina_venta ?? item.costo_tubos_venta ?? 
       item.costoLamina ?? item.costo_lamina ?? item.costoBase ?? item.subtotal_estructura ?? 0
@@ -94,18 +83,18 @@ export default function Resumen({ items = [], setItems, consecutivo = 'COT-2001'
       item.costoPintura ?? item.costo_pintura_venta ?? item.subtotal_pintura ?? 0
     );
 
-    const costoAccesoriosGeneral = parseSeguro(
-      item.costoAccesorios ?? item.costo_accesorios_venta ?? 0
+    const precioBrazo = parseSeguro(
+      item.brazoPrecio ?? item.brazo?.precio ?? item.brazo?.costo_total ?? item.detalles?.brazo?.precio ?? item.costoBrazo ?? 0
     );
 
-    // Subtotal Accesorios + Brazos + Bujes
-    const baseAccesoriosYComplementos = (accesorios.length > 0 ? sumaAccesoriosLista : costoAccesoriosGeneral) 
-      + precioBrazo 
-      + sumaBujes;
+    // Si la lista de la API trae elementos, usamos el total sumado directamente sin duplicar bujes
+    const costoAccesoriosTotal = sumaAccesoriosLista > 0 
+      ? sumaAccesoriosLista 
+      : parseSeguro(item.costoAccesorios ?? item.costo_accesorios_venta ?? 0);
 
     const estructuraVenta = Math.round(baseEstructura * cantItem);
     const pinturaVenta = Math.round(basePintura * cantItem);
-    const accesoriosVenta = Math.round(baseAccesoriosYComplementos * cantItem);
+    const accesoriosVenta = Math.round((costoAccesoriosTotal + precioBrazo) * cantItem);
 
     const precioTotalItem = estructuraVenta + pinturaVenta + accesoriosVenta;
 
@@ -114,9 +103,10 @@ export default function Resumen({ items = [], setItems, consecutivo = 'COT-2001'
       estructuraVenta,
       pinturaVenta,
       accesoriosVenta,
-      precioTotalItem
+      precioTotalItem,
+      accesoriosLimpios: accesorios
     };
-  }, []);
+  }, []); 
 
   const totalCotizacion = useMemo(() => {
     return items.reduce((acc, item) => {
@@ -289,6 +279,9 @@ export default function Resumen({ items = [], setItems, consecutivo = 'COT-2001'
       totalCotizacion,
       consecutivo,
       clienteSeleccionado,
+      notas,
+      observaciones: notas,
+      notasObservaciones: notas,
       obtenerNit,
       obtenerValoresComerciales,
       formatoCalibreTexto,
@@ -372,15 +365,10 @@ export default function Resumen({ items = [], setItems, consecutivo = 'COT-2001'
           </div>
         ) : (
           items.map((item, index) => {
-            const { cantItem, estructuraVenta, pinturaVenta, accesoriosVenta, precioTotalItem } = obtenerValoresComerciales(item);
-            const accesorios = item.accesoriosLista || item.accesorios_lista || item.detalles?.accesorios || [];
+            const { cantItem, estructuraVenta, pinturaVenta, accesoriosVenta, precioTotalItem, accesoriosLimpios } = obtenerValoresComerciales(item);
             const tramos = item.tramos || item.detalles?.tramos || [];
             const baseObj = obtenerObjetoBase(item);
             const categoria = (item.categoria || '').toLowerCase();
-
-            const brazoObj = item.brazo || item.brazoObjeto || item.detalles?.brazo;
-            const bujeInicialObj = item.bujeInicial || item.detalles?.bujeInicial;
-            const bujeFinalObj = item.bujeFinal || item.detalles?.bujeFinal;
 
             return (
               <div key={item.id || index} className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2 transition hover:border-slate-300">
@@ -413,7 +401,7 @@ export default function Resumen({ items = [], setItems, consecutivo = 'COT-2001'
                   </div>
                 </div>
 
-                {/* TARJETA DINÁMICA SEGÚN DIVERSIFICACIÓN DE CATEGORÍA */}
+                {/* TARJETA DINÁMICA SEGÚN CATEGORÍA */}
                 <div className="bg-white border border-slate-200 p-2.5 rounded-lg text-[10px] space-y-1 font-medium text-slate-700">
                   {categoria === 'gabinetes' || categoria === 'totems' ? (
                     <>
@@ -445,36 +433,11 @@ export default function Resumen({ items = [], setItems, consecutivo = 'COT-2001'
                   <p><strong className="text-slate-900">• Acabado:</strong> Pintura electrostática color {item.pintura || item.detalles?.pintura || item.acabado || 'Blanco Brillante'}.</p>
                 </div>
 
-                {/* DETALLE DE BRAZOS Y BUJES (MODELOS ESTRUCTURALES ADICIONALES) */}
-                {(brazoObj || bujeInicialObj || bujeFinalObj) && (
-                  <div className="bg-white border border-slate-200 p-2 rounded-lg text-[10px] space-y-1">
-                    <span className="font-bold text-slate-800 block border-b border-slate-100 pb-0.5">Brazo / Bujes Incorporados:</span>
-                    
-                    {brazoObj && (
-                      <p className="text-slate-600 pl-1 border-l-2 border-blue-500">
-                        • Brazo: <span className="font-semibold text-slate-800">{brazoObj.nombre || 'Brazo Especial'}</span> ({formatoMoneda(brazoObj.precio || brazoObj.costo_total || item.brazoPrecio || 0)})
-                      </p>
-                    )}
-
-                    {bujeInicialObj && (
-                      <p className="text-slate-600 pl-1 border-l-2 border-indigo-500">
-                        • Buje Base: <span className="font-semibold text-slate-800">{bujeInicialObj.nombre}</span> ({formatoMoneda(bujeInicialObj.precio || 0)})
-                      </p>
-                    )}
-
-                    {bujeFinalObj && (
-                      <p className="text-slate-600 pl-1 border-l-2 border-indigo-500">
-                        • Buje Punta: <span className="font-semibold text-slate-800">{bujeFinalObj.nombre}</span> ({formatoMoneda(bujeFinalObj.precio || 0)})
-                      </p>
-                    )}
-                  </div>
-                )}
-
-                {/* ACCESORIOS CONVENCIONALES */}
-                {accesorios.length > 0 && (
+                {/* ACCESORIOS SELECCIONADOS (MOSTRAR ÚNICA Y EXCLUSIVAMENTE LO DEVUELTO POR LA API) */}
+                {accesoriosLimpios.length > 0 && (
                   <div className="bg-white border border-slate-200 p-2 rounded-lg text-[10px] space-y-0.5">
                     <span className="font-bold text-slate-700 block">Otros Accesorios:</span>
-                    {accesorios.map((acc, aIdx) => (
+                    {accesoriosLimpios.map((acc, aIdx) => (
                       <p key={aIdx} className="text-slate-600 pl-1 border-l-2 border-amber-400">
                         • {acc.nombre || acc.descripcion} (x{acc.cantidad || 1})
                       </p>
@@ -497,6 +460,20 @@ export default function Resumen({ items = [], setItems, consecutivo = 'COT-2001'
             );
           })
         )}
+      </div>
+
+      {/* NOTAS / OBSERVACIONES */}
+      <div className="space-y-1">
+        <label className="text-[10px] uppercase font-bold text-slate-500 block tracking-wider">
+          Notas / Observaciones
+        </label>
+        <textarea
+          rows={2}
+          placeholder="Escribe aquí notas adicionales o condiciones especiales para el PDF..."
+          value={notas}
+          onChange={(e) => setNotas(e.target.value)}
+          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs text-slate-800 outline-none focus:border-blue-500 resize-none"
+        />
       </div>
 
       {/* TOTALES DE LA COTIZACIÓN */}

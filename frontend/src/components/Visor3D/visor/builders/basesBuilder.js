@@ -3,12 +3,16 @@ import * as THREE from 'three';
 export function construirBases(props) {
   const { loader, laminas, matGenerico, scene, obtenerPulgadasTubo, params, esCuadrado } = props;
 
+  // 1. VERIFICACIÓN DE ACTIVACIÓN
+  // Si las casillas de incluir base/platina no están activas o la forma es 'Sin Base', abortamos la construcción 3D.
+  const incluirBaseActivo = params?.incluirBase ?? params?.incluirPlatina ?? true;
+  if (!incluirBaseActivo) return;
   if (!params?.formaBase || params.formaBase === 'Sin Base') return;
 
-  // 1. DIMENSIONES
+  // 2. DIMENSIONES
   const pulgadasTubo = typeof obtenerPulgadasTubo === 'function' ? obtenerPulgadasTubo(0) : 4;
   const radioTuboM = esCuadrado ? (pulgadasTubo / 100) / 2 : ((pulgadasTubo * 25.4) / 1000) / 2;
-  const ladoBaseM = (parseFloat(params?.platinaLargo) || 30) / 100;
+  const ladoBaseM = (parseFloat(params?.platinaLargo || params?.ladoBase) || 30) / 100;
   
   let espesorM = 0.003;
   if (Array.isArray(laminas)) {
@@ -18,7 +22,7 @@ export function construirBases(props) {
 
   const esExteriorCuadrado = (params.formaBase || '').toLowerCase().includes('cuad');
 
-  // 2. SHAPE EXTERIOR
+  // 3. SHAPE EXTERIOR
   const shapeBase = new THREE.Shape();
   const medioLado = ladoBaseM / 2;
 
@@ -32,7 +36,7 @@ export function construirBases(props) {
     shapeBase.absarc(0, 0, medioLado, 0, Math.PI * 2, false);
   }
 
-  // 3. AGUJERO CENTRAL
+  // 4. AGUJERO CENTRAL
   const holeCentro = new THREE.Path();
   if (esCuadrado) {
     holeCentro.moveTo(-radioTuboM, -radioTuboM);
@@ -45,7 +49,7 @@ export function construirBases(props) {
   }
   shapeBase.holes.push(holeCentro);
 
-  // 4. BARRENOS PARA TORNILLOS (Distribución limpia según forma)
+  // 5. BARRENOS PARA TORNILLOS (Distribución limpia según forma)
   const radioBarreno = 0.008; // ~16mm
   const radioBarrenosM = medioLado * 0.72; // Distancia desde el centro
 
@@ -68,16 +72,19 @@ export function construirBases(props) {
     shapeBase.holes.push(holePerno);
   }
 
-  // EXTRUSIÓN
+  // 6. EXTRUSIÓN Y RENDERIZADO DE LA BASE
   const extrudeSettings = { depth: espesorM, bevelEnabled: false, curveSegments: 32 };
   const geomBase = new THREE.ExtrudeGeometry(shapeBase, extrudeSettings);
   const meshBase = new THREE.Mesh(geomBase, matGenerico);
   
-  meshBase.rotation.x = Math.PI / 2;
-  meshBase.position.y = espesorM;
+  // Rotación negativa en X para proyectar hacia arriba sobre el plano del suelo
+  meshBase.rotation.x = -Math.PI / 2;
+  meshBase.position.y = 0;
+  meshBase.castShadow = true;
+  meshBase.receiveShadow = true;
   scene.add(meshBase);
 
-  // 5. PIES DE AMIGO
+  // 7. PIES DE AMIGO (CARTELAS)
   const usarPie = params?.usarPieAmigo ?? true;
   const numPies = usarPie ? (parseInt(params?.cantPieAmigo, 10) || 4) : 0;
 
@@ -116,7 +123,13 @@ export function construirBases(props) {
           radioTuboM - (boxP.min.z * escalaXZ)
         );
 
-        pieInst.traverse(c => { if (c.isMesh) c.material = matGenerico; });
+        pieInst.traverse(c => { 
+          if (c.isMesh) {
+            c.material = matGenerico;
+            c.castShadow = true;
+            c.receiveShadow = true;
+          } 
+        });
         grupoRadial.add(pieInst);
         scene.add(grupoRadial);
       }

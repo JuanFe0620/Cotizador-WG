@@ -81,10 +81,6 @@ export default function SelectorBrazosPoste({ params = {}, setParams, accesorios
     const checked = e.target.checked;
     setIncluir(checked);
 
-    let listaAcc = [...(params.accesoriosSeleccionados || [])];
-    const catalogoAcc = accesorios.length > 0 ? accesorios : (params.accesorios || []);
-    const cuboObj = catalogoAcc.find(a => String(a.nombre || '').toLowerCase().includes('cubo'));
-
     if (checked) {
       let listaBD = brazosDisponibles;
       if (listaBD.length === 0) {
@@ -96,26 +92,16 @@ export default function SelectorBrazosPoste({ params = {}, setParams, accesorios
         nuevaListaBrazos.push(crearObjetoBrazo(listaBD[0], alturaAnclaje, rotacion));
       }
 
-      if (cuboObj && !listaAcc.some(id => String(id) === String(cuboObj.id))) {
-        listaAcc.push(cuboObj.id);
-      }
-
       setParams((prev) => ({
         ...prev,
         incluirBrazoPoste: true,
-        accesoriosSeleccionados: listaAcc,
         brazosAdicionales: nuevaListaBrazos,
         brazos: nuevaListaBrazos,
       }));
     } else {
-      if (cuboObj) {
-        listaAcc = listaAcc.filter(id => String(id) !== String(cuboObj.id));
-      }
-
       setParams((prev) => ({
         ...prev,
         incluirBrazoPoste: false,
-        accesoriosSeleccionados: listaAcc,
         brazosAdicionales: [],
         brazos: [],
       }));
@@ -147,21 +133,13 @@ export default function SelectorBrazosPoste({ params = {}, setParams, accesorios
     const nuevaLista = brazosAgregados.filter((_, i) => i !== index);
     const sigueTeniendoBrazos = nuevaLista.length > 0;
 
-    let listaAcc = [...(params.accesoriosSeleccionados || [])];
-
     if (!sigueTeniendoBrazos) {
-      const catalogoAcc = accesorios.length > 0 ? accesorios : (params.accesorios || []);
-      const cuboObj = catalogoAcc.find(a => String(a.nombre || '').toLowerCase().includes('cubo'));
-      if (cuboObj) {
-        listaAcc = listaAcc.filter(id => String(id) !== String(cuboObj.id));
-      }
       setIncluir(false);
     }
 
     setParams((prev) => ({
       ...prev,
       incluirBrazoPoste: sigueTeniendoBrazos,
-      accesoriosSeleccionados: listaAcc,
       brazosAdicionales: nuevaLista,
       brazos: nuevaLista,
     }));

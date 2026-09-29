@@ -17,7 +17,6 @@ export default function App() {
   const [tabActual, setTabActual] = useState('cotizador');
   const visorRef = useRef(null);
   
-  // Persistencia dual: Backend / LocalStorage sincronizado con el Admin
   const [laminas, setLaminas] = useState(() => {
     const local = localStorage.getItem('m3_laminas');
     return local ? JSON.parse(local) : [];
@@ -38,7 +37,6 @@ export default function App() {
     return local ? JSON.parse(local) : [];
   });
 
-  // Guardar dinámicamente en LocalStorage cuando Admin modifique el estado
   useEffect(() => {
     localStorage.setItem('m3_laminas', JSON.stringify(laminas));
   }, [laminas]);
@@ -63,12 +61,10 @@ export default function App() {
   const [errorBackend, setErrorBackend] = useState(null);
   const [mensajeExito, setMensajeExito] = useState(null);
 
-  // Estados para el Historial y Navegación
   const [historialCotizaciones, setHistorialCotizaciones] = useState([]);
-
-  // Control de modo activo para el Visor 3D
   const [editandoFormulario, setEditandoFormulario] = useState(true);
 
+  // Estado inicial limpio sin selecciones por defecto de bujes ni accesorios
   const [params, setParams] = useState({
     laminaId: '',
     alto: 120,
@@ -76,6 +72,9 @@ export default function App() {
     fondo: 60,
     tramos: [],
     accesoriosSeleccionados: [],
+    bujesSeleccionados: [],
+    bujeInicialId: '',
+    bujeFinalId: '',
     detallesAccesorios: {},
     cantidadesAcc: {},
     incluirBioporter: false,
@@ -110,7 +109,6 @@ export default function App() {
     }
   };
 
-  // Estado para los brazos
   const [brazos, setBrazos] = useState(() => {
     const local = localStorage.getItem('m3_brazos');
     return local ? JSON.parse(local) : [];
@@ -163,23 +161,33 @@ export default function App() {
     cargarHistorial();
   }, []);
 
-  // Limpieza estricta de parámetros según la categoría seleccionada
+  // LIMPIEZA RIGUROSA AL CAMBIAR CATEGORÍA
   useEffect(() => {
     const esPosteOBrazo = categoriaSel === 'postes' || categoriaSel === 'brazos';
     
     setEditandoFormulario(true);
     setParams(prev => {
+      if (prev.categoria === categoriaSel) return prev;
+
       const nuevoState = {
         ...prev,
+        categoria: categoriaSel,
+        // Limpiar de forma explícita selecciones de accesorios y bujes antiguos
         accesoriosSeleccionados: [],
+        bujesSeleccionados: [],
+        bujeInicialId: '',
+        bujeFinalId: '',
+        bujeBaseId: '',
+        bujePuntaId: '',
+        bujeInicial: null,
+        bujeFinal: null,
         detallesAccesorios: {},
         cantidadesAcc: {},
         tramos: esPosteOBrazo 
-          ? [{ id: Date.now(), alto: 150, tuboId: '', forma: 'redondo' }] 
+          ? (prev.tramos?.length > 0 ? prev.tramos : [{ id: Date.now(), alto: 150, tuboId: '', forma: 'redondo' }])
           : []
       };
 
-      // Si cambiamos a Gabinetes o Totems, se eliminan los brazos retenidos
       if (!esPosteOBrazo) {
         delete nuevoState.brazo;
         delete nuevoState.brazosMontados;
@@ -235,14 +243,13 @@ export default function App() {
     setErrorBackend(null);
   };
 
-  const handleAgregarACotizacion = async (payload = {}) => {
+const handleAgregarACotizacion = async (payload = {}) => {
     setCargandoCotizacion(true);
     setErrorBackend(null);
 
     const esGabinete = categoriaSel === 'gabinetes' || categoriaSel === 'totems';
     const paramsUnificados = { ...params, ...payload };
     
-    // Si es Gabinete/Totem, remover cualquier residuo de brazos pasados por params
     if (esGabinete) {
       delete paramsUnificados.brazo;
       delete paramsUnificados.brazosMontados;
@@ -251,14 +258,28 @@ export default function App() {
       delete paramsUnificados.brazo_id;
     }
 
-    const tramosFiltrados = esGabinete ? [] : (paramsUnificados.tramos || []);
+    // Normalización de tramos
+    const tramosFiltrados = esGabinete ? [] : (paramsUnificados.tramos || []).map(t => ({
+      ...t,
+      tuboId: t.tuboId || t.tubo_id || '',
+      alto: Number(t.alto || t.longitud || 0)
+    }));
+    
+    // Filtrado de accesorios
     const rawAccs = paramsUnificados.accesoriosSeleccionados || [];
-    const accsValidos = rawAccs.filter(id => id !== null && id !== undefined && id !== '');
+    const accsValidos = rawAccs.filter(id => {
+      if (id === null || id === undefined || id === '') return false;
+      const idStr = String(typeof id === 'object' ? id.id : id).toLowerCase();
+      return idStr !== 'platina_base' && idStr !== 'platina_anclaje';
+    });
 
     const paramsParaBackend = {
       ...paramsUnificados,
       tramos: tramosFiltrados,
       accesoriosSeleccionados: accsValidos,
+      bujesSeleccionados: paramsUnificados.bujesSeleccionados || [],
+      bujeInicialId: paramsUnificados.bujeInicialId || paramsUnificados.bujeBaseId || '',
+      bujeFinalId: paramsUnificados.bujeFinalId || paramsUnificados.bujePuntaId || '',
       cantidadesAcc: paramsUnificados.cantidadesAcc || {},
       detallesAccesorios: paramsUnificados.detallesAccesorios || {},
       incluirBase: esGabinete ? false : (paramsUnificados.incluirBase ?? true),
@@ -287,11 +308,38 @@ export default function App() {
       if (respuesta.ok) {
         dataServidor = await respuesta.json();
       } else {
-        console.warn("El backend respondió con error, usando estimación local.");
+        console.warn("Servidor respondió con error 500, ejecutando cálculo de contingencia local.");
       }
     } catch (error) {
-      console.warn("Servidor no accesible, calculando ítem localmente...", error);
+      console.warn("Servidor inalcanzable, calculando contingencia local:", error);
     }
+
+    // --- CÁLCULO DE RESPALDO (Por si el servidor falla o responde 500) ---
+    let costoEstructuraLocal = 0;
+    if (tramosFiltrados.length > 0) {
+      tramosFiltrados.forEach(tramo => {
+        const tuboObj = tubos.find(t => String(t.id) === String(tramo.tuboId));
+        const precioMetro = tuboObj ? Number(tuboObj.precio_metro || tuboObj.precio || 0) : 15000;
+        const metros = (Number(tramo.alto) || 0) / 100;
+        costoEstructuraLocal += precioMetro * metros;
+      });
+    }
+
+    let costoAccesoriosLocal = 0;
+    accsValidos.forEach(accId => {
+      const accObj = accesorios.find(a => String(a.id) === String(accId));
+      const cant = paramsUnificados.cantidadesAcc?.[accId] || 1;
+      const precioAcc = accObj ? Number(accObj.precio || accObj.precio_venta || 0) : 15000;
+      costoAccesoriosLocal += precioAcc * cant;
+    });
+
+    const costoPinturaLocal = 12000; // Valor base estimado de pintura
+
+    // Extraer valores finales (Servidor primero, si no existe usa el Respaldo Local)
+    const costoBaseReal = Number(dataServidor?.costo_base || dataServidor?.costo_tubos_venta || (costoEstructuraLocal > 0 ? costoEstructuraLocal : 25000));
+    const costoPinturaReal = Number(dataServidor?.costo_pintura_venta || dataServidor?.costo_pintura || costoPinturaLocal);
+    const costoAccReal = Number(dataServidor?.costo_accesorios_venta || dataServidor?.costo_accesorios || costoAccesoriosLocal);
+    const totalReal = Number(dataServidor?.precio_venta || dataServidor?.total || (costoBaseReal + costoPinturaReal + costoAccReal));
 
     let materialNombre = 'Estructura Estándar';
     if (categoriaSel === 'postes' || categoriaSel === 'brazos') {
@@ -311,56 +359,32 @@ export default function App() {
       laminaId: paramsParaBackend.laminaId,
       pintura: paramsParaBackend.nombrePintura || 'Estándar',
       colorPintura: paramsParaBackend.colorPintura || '#2563eb',
-      costoPintura: dataServidor?.costo_pintura_venta || 18500,
-      costoTubos: dataServidor?.costo_tubos_venta || 0,
+      
+      costoBase: costoBaseReal,
+      costoPintura: costoPinturaReal,
+      costoTubos: costoBaseReal,
+      costoAccesorios: costoAccReal,
+      total: totalReal,
+      
       areaPintable: dataServidor?.area_m2 || 1.5,
       alto: paramsParaBackend.alto || 150,
       ancho: paramsParaBackend.ancho || 50,
       fondo: paramsParaBackend.fondo || 30,
 
-      incluirBase: paramsParaBackend.incluirBase,
-      incluirPlatina: paramsParaBackend.incluirPlatina,
-      formaBase: paramsParaBackend.formaBase,
-      ladoBase: paramsParaBackend.ladoBase,
-      laminaAnclajeId: paramsParaBackend.laminaAnclajeId,
-      incluirPiesAmigo: paramsParaBackend.incluirPiesAmigo,
-      cantidadPies: paramsParaBackend.cantidadPies,
-      altoCartela: paramsParaBackend.altoCartela,
-
       tramos: tramosFiltrados,
       accesoriosSeleccionados: paramsParaBackend.accesoriosSeleccionados,
+      bujesSeleccionados: paramsParaBackend.bujesSeleccionados,
       detallesAccesorios: paramsParaBackend.detallesAccesorios,
       cantidadesAcc: paramsUnificados.cantidadesAcc,
-      accesoriosLista: dataServidor?.accesorios_lista || [],
-      costoBase: dataServidor?.costo_base || 401758,
-      total: dataServidor?.precio_venta || 420258
+      accesoriosLista: dataServidor?.accesorios_lista || []
     };
 
     setItemsCotizacion(prev => [...prev, nuevoItem]);
 
-    setParams(prev => {
-      const res = {
-        ...prev,
-        accesoriosSeleccionados: [],
-        detallesAccesorios: {},
-        cantidadesAcc: {},
-        tramos: (categoriaSel === 'postes' || categoriaSel === 'brazos') 
-          ? [{ id: Date.now(), alto: 150, tuboId: '', forma: 'redondo' }]
-          : []
-      };
-
-      if (esGabinete) {
-        delete res.brazo;
-        delete res.brazosMontados;
-        delete res.brazos;
-        delete res.brazoPTZ;
-      }
-
-      return res;
-    });
-
-    setEditandoFormulario(false);
+    setEditandoFormulario(true);
     setCargandoCotizacion(false);
+    setMensajeExito("Ítem agregado a la cotización.");
+    setTimeout(() => setMensajeExito(null), 2500);
   };
 
   const handleGuardarCotizacionBD = async () => {
@@ -462,7 +486,6 @@ export default function App() {
 
   return (
     <div className="w-screen h-screen bg-slate-100 text-slate-800 flex flex-col overflow-hidden m-0 p-0 font-sans">
-      {/* HEADER MODO CLARO */}
       <header className="bg-white border-b border-slate-300 px-4 py-2 flex justify-between items-center w-full shrink-0 h-14 shadow-sm">
         <div className="flex items-center gap-3">
           <div className="bg-blue-600 font-black text-white px-3 py-1 rounded-lg shadow-sm">M3</div>

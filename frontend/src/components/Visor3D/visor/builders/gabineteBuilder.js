@@ -1,32 +1,27 @@
 import * as THREE from 'three';
 
 /**
- * 3.2. Selección Matricial de Planos CAD por Regla de Alto x Fondo
+ * Selección Matricial de Planos CAD por Regla de Alto x Fondo
  */
 export const obtenerRutaModeloGabinete = (altoCm, fondoCm) => {
   const alto = parseFloat(altoCm) || 0;
   const fondo = parseFloat(fondoCm) || 0;
 
-  // Regla A: Si Alto = 90 cm Y Fondo >= 100 cm
-  if (Math.abs(alto - 90) < 0.1 && fondo >= 100) {
-    return '/models/Plano_Gabinete_90x100.glb';
-  }
-
-  // Regla B: Si 90 cm < Alto <= 120 cm Y Fondo >= 100 cm
-  if (alto > 90 && alto <= 120 && fondo >= 100) {
-    return '/models/Plano_Gabinete_120x100.glb';
-  }
-
-  // Regla C: Si Alto >= 150 cm Y Fondo >= 100 cm
-  if (alto >= 150 && fondo >= 100) {
-    return '/models/Plano_Gabinete_150x100.glb';
-  }
-
-  // Fallback: Si no cumple las dimensiones particulares
+  // --- FAMILIA DE FONDO PROFUNDO (Fondo >= 100 cm) ---
   if (fondo >= 100) {
-    return '/models/Gab60X100X150.glb';
+    if (alto <= 119) {
+      // Alto 90 cm (o menor a 120 cm)
+      return '/models/Gab60X100X90sinRefuerzo.glb';
+    } else if (alto >= 120 && alto < 150) {
+      // Alto 120 cm
+      return '/models/60X100X120.glb';
+    } else {
+      // Alto >= 150 cm
+      return '/models/Gab60X100X150.glb';
+    }
   }
 
+  // --- FAMILIA ESTÁNDAR (Fondo < 100 cm, e.g. 60 cm) ---
   if (alto <= 119) {
     return '/models/Gab60X60X90sinRefuerzo.glb';
   } else if (alto >= 120 && alto < 150) {
@@ -41,17 +36,27 @@ export const construirGabinete = ({ loader, params, matGenerico, scene }) => {
   const anchoUsuario = parseFloat(params?.ancho || params?.detalles?.ancho || params?.anchoGabinete) || 60;
   const fondoUsuario = parseFloat(params?.fondo || params?.detalles?.fondo || params?.fondoGabinete) || 60;
 
+  // Medidas base nativas de los archivos .GLB para cálculo de escala
   const ANCHO_BASE_GLB = 60;
   let FONDO_BASE_GLB = 60;
   let ALTO_BASE_GLB = 90;
 
   if (fondoUsuario >= 100) {
     FONDO_BASE_GLB = 100;
-    ALTO_BASE_GLB = altoUsuario >= 150 ? 150 : (altoUsuario > 90 ? 120 : 90);
-  } else {
-    if (altoUsuario >= 120 && altoUsuario < 150) {
+    if (altoUsuario < 120) {
+      ALTO_BASE_GLB = 90;
+    } else if (altoUsuario >= 120 && altoUsuario < 150) {
       ALTO_BASE_GLB = 120;
-    } else if (altoUsuario >= 150) {
+    } else {
+      ALTO_BASE_GLB = 150;
+    }
+  } else {
+    FONDO_BASE_GLB = 60;
+    if (altoUsuario < 120) {
+      ALTO_BASE_GLB = 90;
+    } else if (altoUsuario >= 120 && altoUsuario < 150) {
+      ALTO_BASE_GLB = 120;
+    } else {
       ALTO_BASE_GLB = 150;
     }
   }
@@ -101,7 +106,7 @@ export const construirGabinete = ({ loader, params, matGenerico, scene }) => {
   );
 
   // -------------------------------------------------------------
-  // 3.3. SISTEMA DE PARALES DE RACK INTERNOS (ESTRUCTURA 3D)
+  // SISTEMA DE PARALES DE RACK INTERNOS (ESTRUCTURA 3D)
   // -------------------------------------------------------------
   const altoMetros = altoUsuario / 100;
   const anchoMetros = anchoUsuario / 100;
@@ -128,7 +133,7 @@ export const construirGabinete = ({ loader, params, matGenerico, scene }) => {
 
   grupoParales.add(paralFrontalIzq, paralFrontalDer);
 
-  // Accesorios Dinámicos: Parales Traseros / Intermedios con Z-Offset
+  // Accesorios Dinámicos: Parales Traseros / Intermedios
   const accesoriosSeleccionados = params?.accesoriosSeleccionados || [];
   const accesorios = params?.accesorios || [];
 

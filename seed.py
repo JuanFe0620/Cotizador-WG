@@ -130,13 +130,24 @@ def sembrar_datos(db=None):
                     db.add(models.Accesorio(**acc))
 
         # -------------------------------------------------------------
-        # 5. SIEMBRA DE BUJES (Actualización dinámica)
+        # 5. SIEMBRA DE BUJES (5 Tipos Totales habilitados para ambos lados)
         # -------------------------------------------------------------
         if hasattr(models, 'Buje'):
+            renombres_bujes = {
+                "Base Circular Cónica": "Buje Universal",
+                "Punta Extensible": "Buje PTZ"
+            }
+            for nombre_anterior, nombre_nuevo in renombres_bujes.items():
+                buje_antiguo = db.query(models.Buje).filter(models.Buje.nombre == nombre_anterior).first()
+                if buje_antiguo:
+                    buje_antiguo.nombre = nombre_nuevo
+
             bujes_deseados = [
-                {"nombre": "Base universal plana escualizable", "precio": 45500, "subtipo": "base", "categorias": "brazos"},
-                {"nombre": "Buje Cónico Estándar", "precio": 15000, "subtipo": "ambos", "categorias": "brazos"},
-                {"nombre": "Buje Reforzado de Carga", "precio": 30000, "subtipo": "punta", "categorias": "brazos"}
+                {"nombre": "Base universal plana escualizable", "precio": 45500, "subtipo": "ambos", "categorias": "brazos"},
+                {"nombre": "Buje Roseta", "precio": 15000, "subtipo": "ambos", "categorias": "brazos"},
+                {"nombre": "Buje Universal", "precio": 28000, "subtipo": "ambos", "categorias": "brazos"},
+                {"nombre": "Platina Rectangular Perforada", "precio": 18000, "subtipo": "ambos", "categorias": "brazos"},
+                {"nombre": "Buje PTZ", "precio": 22000, "subtipo": "ambos", "categorias": "brazos"}
             ]
 
             for buje in bujes_deseados:

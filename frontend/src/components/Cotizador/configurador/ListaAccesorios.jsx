@@ -20,6 +20,7 @@ export default function ListaAccesorios({
   const esGabinete = catSelNorm.includes('gabinete') || catSelNorm.includes('gabinetes');
   const esBaseCuadrada = limpiarTexto(params?.formaBase || '').includes('cuad');
 
+  // Filtrado de accesorios estrictamente por categoría activa
   const accesoriosFiltrados = accesorios.filter(a => {
     let cats = [];
     if (Array.isArray(a.categorias)) {
@@ -131,17 +132,17 @@ export default function ListaAccesorios({
             <div>
               <label className="text-[10px] font-semibold text-slate-700 block mb-0.5">Tipo de Puerta:</label>
               <select
-                value={params?.tipoPuerta || 'vidrio'}
+                value={params?.tipoPuerta || 'normal'}
                 onChange={(e) => setParams(prev => ({ ...prev, tipoPuerta: e.target.value }))}
                 className="w-full bg-white border border-slate-300 rounded-lg p-1.5 text-[10px] text-slate-800 outline-none focus:ring-2 focus:ring-blue-500 font-medium"
               >
-                <option value="vidrio">Vidrio</option>
                 <option value="normal">Normal</option>
+                <option value="vidrio">Vidrio</option>
                 <option value="doble">Doble</option>
               </select>
             </div>
 
-            {(params?.tipoPuerta || 'vidrio') === 'vidrio' && (
+            {(params?.tipoPuerta || 'normal') === 'vidrio' && (
               <div>
                 <label className="text-[10px] font-semibold text-slate-700 block mb-0.5">Acabado:</label>
                 <select

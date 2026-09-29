@@ -3,39 +3,26 @@ import models
 
 def calcular_costo_complementos_bd(params: dict, db: Session) -> tuple[list[dict], float]:
     """
-    Busca dinámicamente cualquier complemento (Brazos en lista o individuales, 
-    Bujes, Accesorios especiales) en la BD/Seed y marca los brazos como PRECIO FIJO.
+    Busca dinámicamente cualquier complemento en la BD/Seed.
     """
     complementos_calculados = []
     area_total_m2 = 0.0
 
-    # 1. Extraer elementos tanto si vienen en listas (UI de brazos montados) como en variables simples
     items_brutos = []
 
-    # Capturar listas de brazos/complementos pasadas desde el cliente
+    # Se agregan únicamente si vienen explícitamente y NO es un brazo
+    cat_param = str(params.get("categoria") or params.get("tipo") or "").lower()
+    if "brazo" in cat_param:
+        return [], 0.0
+
     listas_posibles = (
         params.get("brazosMontados") or 
-        params.get("brazos") or 
         params.get("brazos_lista") or 
         params.get("complementos") or []
     )
     if isinstance(listas_posibles, list):
         items_brutos.extend(listas_posibles)
 
-    # Capturar variables individuales
-    objetos_individuales = [
-        params.get("brazo"),
-        params.get("brazoPTZ"),
-        params.get("brazo_id"),
-        params.get("bujeInicial"),
-        params.get("bujeFinal"),
-        params.get("buje")
-    ]
-    for obj in objetos_individuales:
-        if obj and obj not in items_brutos:
-            items_brutos.append(obj)
-
-    # 2. Procesar cada elemento encontrado contra la BD / Seed
     for elemento in items_brutos:
         if not elemento:
             continue
@@ -45,13 +32,10 @@ def calcular_costo_complementos_bd(params: dict, db: Session) -> tuple[list[dict
             continue
 
         costo_unitario = 0.0
-        nombre_item = "Brazo / Complemento"
+        nombre_item = "Complemento"
         area_m2 = 0.15
-        
-        # Marcado como FIJO por defecto para evitar la multiplicación del margen comercial
         es_fijo = True  
 
-        # Intentar obtener datos directamente del objeto traído por el frontend
         if isinstance(elemento, dict):
             costo_unitario = float(
                 elemento.get("precio") or 
@@ -64,7 +48,6 @@ def calcular_costo_complementos_bd(params: dict, db: Session) -> tuple[list[dict
             if "es_fijo" in elemento:
                 es_fijo = bool(elemento["es_fijo"])
 
-        # Si no traía costo directo, consultar dinámicamente la BD/Seed por ID
         if costo_unitario == 0:
             registro_bd = None
             for modelo_name in ["Brazo", "Buje", "Accesorio", "Producto"]:

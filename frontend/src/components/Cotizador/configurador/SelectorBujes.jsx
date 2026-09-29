@@ -1,117 +1,98 @@
 import React from 'react';
-import { Anchor, CircleDot } from 'lucide-react';
 
-export default function SelectorBujes({ 
-  params = {}, 
-  setParams, 
-  bujes = [] 
-}) {
-  const listaBujes = Array.isArray(bujes) ? bujes : [];
+export default function SelectorBujes({ params = {}, setParams, bujes = [] }) {
+  // Función para normalizar texto
+  const normalizar = (txt = '') =>
+    String(txt)
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase();
 
-  const esDeTipo = (b, tipoBuscado) => {
-    if (!b) return false;
-    
-    const tipo = String(b.subtipo || b.tipo || b.categoria || '').toLowerCase();
-    const nombre = String(b.nombre || b.descripcion || b.titulo || '').toLowerCase();
+  // Muestra todos los bujes disponibles en ambos desplegables para no excluir Rosetas ni Bases
+  const opcionesDisponibles = bujes.filter(b => {
+    const nombre = normalizar(b.nombre || b.descripcion || '');
+    // Excluir únicamente conectores de ensamble si se manejan por separado
+    return !nombre.includes('cubo de ensamble');
+  });
 
-    if (tipoBuscado === 'base') {
-      return (
-        tipo.includes('base') || 
-        tipo.includes('inicial') || 
-        tipo.includes('ambos') || 
-        nombre.includes('base') || 
-        nombre.includes('inicial')
+  const handleBujeInicialChange = (e) => {
+    const valor = e.target.value;
+    const bujeObj = bujes.find(b => String(b.id) === String(valor)) || null;
+    setParams(prev => {
+      const bujesPrevios = (prev.bujesSeleccionados || []).filter(
+        id => String(id) !== String(prev.bujeInicialId)
       );
-    }
+      const nuevosBujes = valor ? [...bujesPrevios, valor] : bujesPrevios;
 
-    if (tipoBuscado === 'carga') {
-      return (
-        tipo.includes('punta') || 
-        tipo.includes('carga') || 
-        tipo.includes('final') || 
-        tipo.includes('ambos') || 
-        nombre.includes('punta') || 
-        nombre.includes('carga') || 
-        nombre.includes('final')
-      );
-    }
-
-    return false;
+      return {
+        ...prev,
+        bujeInicialId: valor,
+        bujeInicial: bujeObj,
+        bujesSeleccionados: nuevosBujes
+      };
+    });
   };
 
-  let bujesBase = listaBujes.filter(b => esDeTipo(b, 'base'));
-  let bujesFinal = listaBujes.filter(b => esDeTipo(b, 'carga'));
+  const handleBujeFinalChange = (e) => {
+    const valor = e.target.value;
+    const bujeObj = bujes.find(b => String(b.id) === String(valor)) || null;
+    setParams(prev => {
+      const bujesPrevios = (prev.bujesSeleccionados || []).filter(
+        id => String(id) !== String(prev.bujeFinalId)
+      );
+      const nuevosBujes = valor ? [...bujesPrevios, valor] : bujesPrevios;
 
-  if (bujesBase.length === 0) {
-    bujesBase = listaBujes;
-  }
-  if (bujesFinal.length === 0) {
-    bujesFinal = listaBujes;
-  }
+      return {
+        ...prev,
+        bujeFinalId: valor,
+        bujeFinal: bujeObj,
+        bujesSeleccionados: nuevosBujes
+      };
+    });
+  };
 
   return (
-    <div className="bg-slate-50/80 p-3.5 rounded-xl border border-slate-200/80 space-y-3">
-      <div className="flex items-center justify-between">
-        <span className="font-bold text-slate-700 text-[11px] uppercase tracking-wider block">
-          Bujes y Acoples de Extremo
-        </span>
-        <span className="text-[10px] text-slate-400 font-mono">
-          {listaBujes.length} disponible(s)
-        </span>
-      </div>
+    <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
+      <span className="font-bold text-slate-600 uppercase block text-[10px] tracking-wider">
+        CONEXIONES Y BUJES DE BRAZO
+      </span>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        {/* 1. Buje Inicial / Anclaje Base */}
-        <div className="bg-white p-2.5 rounded-lg border border-slate-200 shadow-sm space-y-1.5">
-          <label className="text-[11px] font-semibold text-slate-700 flex items-center gap-1.5">
-            <Anchor size={13} className="text-blue-600" /> 
-            Buje Inicial (Base):
+      <div className="grid grid-cols-2 gap-3">
+        {/* Selector Buje Inicial (Base) */}
+        <div>
+          <label className="text-[10px] font-medium text-slate-600 block mb-1 flex items-center gap-1">
+            <span>⚓</span> Buje Inicial (Base):
           </label>
           <select
-            value={params?.buje_inicial_id || ''}
-            onChange={e => setParams(prev => ({ ...prev, buje_inicial_id: e.target.value }))}
-            className="w-full bg-slate-50 border border-slate-300 rounded-lg p-1.5 text-slate-800 text-xs outline-none focus:ring-2 focus:ring-blue-500 font-medium cursor-pointer"
+            value={params.bujeInicialId || ''}
+            onChange={handleBujeInicialChange}
+            className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-blue-500"
           >
             <option value="">-- Sin Buje Base --</option>
-            {bujesBase.map(b => {
-              const id = b.id ?? b._id;
-              const nombre = b.nombre || b.descripcion || b.titulo || `Buje ${id}`;
-              const precio = Number(b.precio || b.precio_unitario || 0);
-              const precioTxt = precio > 0 ? ` (+$${precio.toLocaleString('es-CO')})` : '';
-
-              return (
-                <option key={id} value={String(id)}>
-                  {nombre}{precioTxt}
-                </option>
-              );
-            })}
+            {opcionesDisponibles.map(b => (
+              <option key={b.id} value={b.id}>
+                {b.nombre || b.descripcion} {b.precio ? `(+$${Number(b.precio).toLocaleString('es-CO')})` : ''}
+              </option>
+            ))}
           </select>
         </div>
 
-        {/* 2. Buje Final / Punta Carga */}
-        <div className="bg-white p-2.5 rounded-lg border border-slate-200 shadow-sm space-y-1.5">
-          <label className="text-[11px] font-semibold text-slate-700 flex items-center gap-1.5">
-            <CircleDot size={13} className="text-emerald-600" /> 
-            Buje Final (Carga):
+        {/* Selector Buje Final (Carga) */}
+        <div>
+          <label className="text-[10px] font-medium text-slate-600 block mb-1 flex items-center gap-1">
+            <span>🎯</span> Buje Final (Carga):
           </label>
           <select
-            value={params?.buje_final_id || ''}
-            onChange={e => setParams(prev => ({ ...prev, buje_final_id: e.target.value }))}
-            className="w-full bg-slate-50 border border-slate-300 rounded-lg p-1.5 text-slate-800 text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-medium cursor-pointer"
+            value={params.bujeFinalId || ''}
+            onChange={handleBujeFinalChange}
+            className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-blue-500"
           >
             <option value="">-- Sin Buje Carga --</option>
-            {bujesFinal.map(b => {
-              const id = b.id ?? b._id;
-              const nombre = b.nombre || b.descripcion || b.titulo || `Buje ${id}`;
-              const precio = Number(b.precio || b.precio_unitario || 0);
-              const precioTxt = precio > 0 ? ` (+$${precio.toLocaleString('es-CO')})` : '';
-
-              return (
-                <option key={id} value={String(id)}>
-                  {nombre}{precioTxt}
-                </option>
-              );
-            })}
+            {opcionesDisponibles.map(b => (
+              <option key={b.id} value={b.id}>
+                {b.nombre || b.descripcion} {b.precio ? `(+$${Number(b.precio).toLocaleString('es-CO')})` : ''}
+              </option>
+            ))}
           </select>
         </div>
       </div>
