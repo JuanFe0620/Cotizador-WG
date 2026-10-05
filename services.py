@@ -10,7 +10,7 @@ from pricing_totems import calcular_precio_totem
 
 def calcular_item_cotizacion(categoria: str, params: dict, nivel_precio: int, db: Session) -> dict:
     
-    factor_margen = 1.55 if nivel_precio == 1 else 1.70
+    factor_margen = 1.55 if nivel_precio == 1 else 2.2
 
     costo_material = 0.0
     area_tubo_m2 = 0.0
@@ -50,7 +50,7 @@ def calcular_item_cotizacion(categoria: str, params: dict, nivel_precio: int, db
         
         cubicaje_m3 = alto_m * ancho_m * fondo_m
         
-        area_tubo_m2 = 2.0 * ((ancho_m * alto_m) + (ancho_m * fondo_m) + (alto_m * fondo_m))
+        area_tubo_m2 = 3 * ((ancho_m * alto_m) + (ancho_m * fondo_m) + (alto_m * fondo_m))
         area_gabinete_cm2 = area_tubo_m2 * 10000.0 * 2
 
         precio_cm2 = obtener_precio_cm2_lamina(lamina_id, db)
@@ -70,6 +70,15 @@ def calcular_item_cotizacion(categoria: str, params: dict, nivel_precio: int, db
         if a_id and str(a_id).strip().lower() not in valores_invalidos:
             if a_id not in acc_ids_manuales:
                 acc_ids_manuales.append(a_id)
+
+    # 1.1b Opciones directas de caperuza y videoportero en brazos
+    if params.get("caperuzaBase") or params.get("cubreAnclaje") or params.get("caperuza"):
+        if not any("caperuza" in str(a).lower() or "cubre" in str(a).lower() for a in acc_ids_manuales):
+            acc_ids_manuales.append("Caperuza / Cubre-anclaje Embellecedora")
+
+    if params.get("videoporteroPunta") or params.get("soporteVideoportero") or params.get("accesorioPunta") == "videoportero":
+        if not any("videoportero" in str(a).lower() or "portero" in str(a).lower() for a in acc_ids_manuales):
+            acc_ids_manuales.append("Soporte Caja Videoportero en Punta")
 
     # 1.2 Extraer bujes
     bujes_detectados = []
@@ -105,10 +114,20 @@ def calcular_item_cotizacion(categoria: str, params: dict, nivel_precio: int, db
     lista_bujes_base = []
     if bujes_detectados:
         try:
-            bujes_db = db.query(models.Buje).filter(
-                (models.Buje.id.in_([b for b in bujes_detectados if str(b).isdigit()])) |
-                (models.Buje.nombre.in_([str(b) for b in bujes_detectados]))
-            ).all()
+            todos_bujes = db.query(models.Buje).all()
+            bujes_db = []
+            for b in todos_bujes:
+                for b_det in bujes_detectados:
+                    b_det_str = str(b_det).strip().lower()
+                    if str(b.id) == b_det_str or b.nombre.strip().lower() == b_det_str:
+                        if b not in bujes_db: bujes_db.append(b)
+                        break
+                    # Coincidencia por slug o palabras clave
+                    slug = b.nombre.strip().lower().replace(" ", "_").replace("(", "").replace(")", "").replace("/", "_")
+                    if b_det_str in slug or slug in b_det_str:
+                        if b not in bujes_db: bujes_db.append(b)
+                        break
+
             
             for b in bujes_db:
                 # Lectura de precio segura contra errores de esquema

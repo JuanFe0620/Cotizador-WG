@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 # --- ESQUEMAS PARA CÁLCULO DE TUBERÍA ---
 class ItemTubo(BaseModel):
@@ -24,3 +24,35 @@ class CotizarGabineteRequest(BaseModel):
     factor_margen: float = 1.35
     incluye_chapa: bool = False
     precio_chapa: float = 0.0
+
+# --- ESQUEMAS PARA COTIZACIONES ---
+class ItemCotizacionSchema(BaseModel):
+    categoria: str
+    descripcion: str
+    lamina: Optional[str] = None
+    pintura: Optional[str] = None
+    costoPintura: Optional[float] = 0.0
+    costoTubos: Optional[float] = 0.0
+    areaPintable: Optional[float] = 0.0
+    alto: Optional[float] = 0.0
+    ancho: Optional[float] = 0.0
+    fondo: Optional[float] = 0.0
+    costoBase: Optional[float] = 0.0
+    total: Optional[float] = 0.0
+    accesoriosLista: Optional[List[Dict[str, Any]]] = []
+    configuracion: Optional[Dict[str, Any]] = None
+    params: Optional[Dict[str, Any]] = None
+
+class GuardarCotizacionReq(BaseModel):
+    consecutivo: Optional[str] = None
+    cliente_id: Optional[int] = None
+    clienteId: Optional[int] = None
+    clienteNombre: Optional[str] = "Consumidor Final / Mostrador"
+    cliente_nombre: Optional[str] = None
+    clienteNit: Optional[str] = None
+    cliente_nit: Optional[str] = None
+    observaciones: Optional[str] = None
+    notas: Optional[str] = None
+    nivelPrecio: Optional[int] = 1
+    total: Optional[float] = 0.0
+    items: List[ItemCotizacionSchema]

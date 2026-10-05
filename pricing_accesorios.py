@@ -78,15 +78,16 @@ def calcular_costo_accesorios_bd(
 
         det = detalles.get(str(acc_id)) or detalles.get(acc_id) or det_item or {}
 
-        # BÚSQUEDA ROBUTA EN BASE DE DATOS (POR ID O POR NOMBRE / COINCIDENCIA)
+        # BÚSQUEDA ROBUSTA EN BASE DE DATOS (POR ID O POR NOMBRE / COINCIDENCIA)
         acc_db = None
         if hasattr(models, 'Accesorio'):
             if id_str.isdigit():
                 acc_db = db.query(models.Accesorio).filter(models.Accesorio.id == int(acc_id)).first()
             else:
+                palabra_clave = str(acc_id).split()[0].replace("/", "").strip() if str(acc_id).strip() else str(acc_id)
                 acc_db = db.query(models.Accesorio).filter(
-                    (models.Accesorio.id == str(acc_id)) | 
-                    (models.Accesorio.nombre.ilike(f"%{acc_id}%"))
+                    (models.Accesorio.nombre.ilike(f"%{acc_id}%")) |
+                    (models.Accesorio.nombre.ilike(f"%{palabra_clave}%"))
                 ).first()
 
         # Si tampoco está en la tabla Accesorio, buscar en la tabla Buje si existe
@@ -94,9 +95,10 @@ def calcular_costo_accesorios_bd(
             if id_str.isdigit():
                 acc_db = db.query(models.Buje).filter(models.Buje.id == int(acc_id)).first()
             else:
+                palabra_clave = str(acc_id).split()[0].replace("/", "").strip() if str(acc_id).strip() else str(acc_id)
                 acc_db = db.query(models.Buje).filter(
-                    (models.Buje.id == str(acc_id)) | 
-                    (models.Buje.nombre.ilike(f"%{acc_id}%"))
+                    (models.Buje.nombre.ilike(f"%{acc_id}%")) |
+                    (models.Buje.nombre.ilike(f"%{palabra_clave}%"))
                 ).first()
 
         # Determinación prioritaria del nombre real

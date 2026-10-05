@@ -4,29 +4,54 @@ export function construirBases(props) {
   const { loader, laminas, matGenerico, scene, obtenerPulgadasTubo, params, esCuadrado } = props;
 
   // 1. VERIFICACIÓN DE ACTIVACIÓN
-  // Si las casillas de incluir base/platina no están activas o la forma es 'Sin Base', abortamos la construcción 3D.
-  const incluirBaseActivo = params?.incluirBase ?? params?.incluirPlatina ?? true;
-  if (!incluirBaseActivo) return;
-  if (!params?.formaBase || params.formaBase === 'Sin Base') return;
+  // Se renderiza si la casilla de incluir base/platina está activa o se ha seleccionado una forma válida
+  const incluirBaseActivo = params?.incluirBase ?? params?.incluirPlatina ?? (params?.formaBase && params?.formaBase !== 'Sin Base');
+  if (!incluirBaseActivo || params?.formaBase === 'Sin Base') return;
 
-  // 2. DIMENSIONES
-  const pulgadasTubo = typeof obtenerPulgadasTubo === 'function' ? obtenerPulgadasTubo(0) : 4;
-  const radioTuboM = esCuadrado ? (pulgadasTubo / 100) / 2 : ((pulgadasTubo * 25.4) / 1000) / 2;
-  const ladoBaseM = (parseFloat(params?.platinaLargo || params?.ladoBase) || 30) / 100;
-  
-  let espesorM = 0.003;
-  if (Array.isArray(laminas)) {
-    const lamina = laminas.find(l => String(l.id) === String(params?.laminaAnclajeId));
-    if (lamina) espesorM = (parseFloat(lamina.espesor_mm) || 3.0) / 1000;
+  const formaBase = params?.formaBase || 'Base Redonda';
+  const esBaseCuadrada = String(formaBase).toLowerCase().includes('cuad');
+
+  // 2. DIMENSIONES Y ESCALA SEGÚN PARÁMETROS
+  // Dibuja la forma exterior (cuadrada o redonda) según 'params.ladoBase' / 'params.diametroBase' (20 cm de referencia).
+  const medidaBaseCm = parseFloat(params?.ladoBase ?? params?.diametroBase ?? params?.dimensionBase ?? params?.platinaLargo ?? params?.anchoBase) || 20;
+  const anchoDeseadoM = medidaBaseCm / 100;
+  const medioLado = anchoDeseadoM / 2;
+
+  // Dimensiones del tubo actual (coincidencia EXACTA para el orificio central)
+  let pulgadasTubo = 3;
+  try {
+    if (typeof obtenerPulgadasTubo === 'function') {
+      const p = obtenerPulgadasTubo(0);
+      if (p && !isNaN(parseFloat(p))) pulgadasTubo = parseFloat(p);
+    }
+  } catch (e) {
+    pulgadasTubo = 3;
   }
 
-  const esExteriorCuadrado = (params.formaBase || '').toLowerCase().includes('cuad');
+  // Radio o mitad de ancho del tubo actual
+  const radioTuboM = esCuadrado 
+    ? ((pulgadasTubo / 100) / 2) 
+    : (((pulgadasTubo * 0.0254) / 2));
 
-  // 3. SHAPE EXTERIOR
+  // Espesor de lámina seleccionada (~6 mm o 0.006m)
+  let espesorM = 0.006;
+  if (Array.isArray(laminas) && params?.laminaAnclajeId) {
+    const lamina = laminas.find(l => String(l.id) === String(params?.laminaAnclajeId));
+    if (lamina) {
+      const espMm = parseFloat(lamina.espesor_mm || lamina.espesorMm || lamina.calibre_mm);
+      if (!isNaN(espMm) && espMm > 0) espesorM = espMm / 1000;
+    }
+  }
+
+  // Grupo contenedor de la base y cartelas
+  const grupoBaseCompleta = new THREE.Group();
+  scene.add(grupoBaseCompleta);
+
+  // 3. GENERACIÓN PROCEDURAL CON THREE.Shape Y THREE.ExtrudeGeometry
   const shapeBase = new THREE.Shape();
-  const medioLado = ladoBaseM / 2;
 
-  if (esExteriorCuadrado) {
+  // A) Contorno exterior (Cuadrado o Redondo)
+  if (esBaseCuadrada) {
     shapeBase.moveTo(-medioLado, -medioLado);
     shapeBase.lineTo(medioLado, -medioLado);
     shapeBase.lineTo(medioLado, medioLado);
@@ -36,103 +61,114 @@ export function construirBases(props) {
     shapeBase.absarc(0, 0, medioLado, 0, Math.PI * 2, false);
   }
 
-  // 4. AGUJERO CENTRAL
+  // B) Orificio central coincidente EXACTAMENTE con las dimensiones del tubo actual (sin luz ni holgura)
   const holeCentro = new THREE.Path();
   if (esCuadrado) {
-    holeCentro.moveTo(-radioTuboM, -radioTuboM);
-    holeCentro.lineTo(radioTuboM, -radioTuboM);
-    holeCentro.lineTo(radioTuboM, radioTuboM);
-    holeCentro.lineTo(-radioTuboM, radioTuboM);
+    const hw = radioTuboM;
+    holeCentro.moveTo(-hw, -hw);
+    holeCentro.lineTo(hw, -hw);
+    holeCentro.lineTo(hw, hw);
+    holeCentro.lineTo(-hw, hw);
     holeCentro.closePath();
   } else {
     holeCentro.absarc(0, 0, radioTuboM, 0, Math.PI * 2, true);
   }
   shapeBase.holes.push(holeCentro);
 
-  // 5. BARRENOS PARA TORNILLOS (Distribución limpia según forma)
-  const radioBarreno = 0.008; // ~16mm
-  const radioBarrenosM = medioLado * 0.72; // Distancia desde el centro
+  // C) 4 Barrenos de fijación en las esquinas / perímetro exterior
+  const radioBarreno = 0.008; // ~16mm diámetro
+  const radioBarrenosM = medioLado * 0.75;
 
   for (let i = 0; i < 4; i++) {
     const holePerno = new THREE.Path();
-    let x, y;
-
-    if (esExteriorCuadrado) {
-      // Posiciones en esquinas
-      x = (i === 0 || i === 3 ? 1 : -1) * radioBarrenosM;
-      y = (i === 0 || i === 1 ? 1 : -1) * radioBarrenosM;
+    let bx, bz;
+    if (esBaseCuadrada) {
+      bx = (i === 0 || i === 3 ? 1 : -1) * radioBarrenosM;
+      bz = (i === 0 || i === 1 ? 1 : -1) * radioBarrenosM;
     } else {
-      // Distribución radial circular limpia (45°, 135°, 225°, 315°)
-      const angulo = (i * Math.PI / 2) + (Math.PI / 4);
-      x = Math.cos(angulo) * radioBarrenosM;
-      y = Math.sin(angulo) * radioBarrenosM;
+      const ang = (i * Math.PI / 2) + (Math.PI / 4);
+      bx = Math.cos(ang) * radioBarrenosM;
+      bz = Math.sin(ang) * radioBarrenosM;
     }
-
-    holePerno.absarc(x, y, radioBarreno, 0, Math.PI * 2, true);
+    holePerno.absarc(bx, bz, radioBarreno, 0, Math.PI * 2, true);
     shapeBase.holes.push(holePerno);
   }
 
-  // 6. EXTRUSIÓN Y RENDERIZADO DE LA BASE
-  const extrudeSettings = { depth: espesorM, bevelEnabled: false, curveSegments: 32 };
+  // D) Extrusión de la platina apoyada en el suelo (Y = 0)
+  const extrudeSettings = {
+    depth: espesorM,
+    bevelEnabled: false,
+    curveSegments: 36
+  };
   const geomBase = new THREE.ExtrudeGeometry(shapeBase, extrudeSettings);
   const meshBase = new THREE.Mesh(geomBase, matGenerico);
-  
-  // Rotación negativa en X para proyectar hacia arriba sobre el plano del suelo
+
+  // Rotar en X para que la forma XY quede horizontal en el plano XZ y la extrusión crezca en +Y
   meshBase.rotation.x = -Math.PI / 2;
-  meshBase.position.y = 0;
+  meshBase.position.set(0, 0, 0);
   meshBase.castShadow = true;
   meshBase.receiveShadow = true;
-  scene.add(meshBase);
 
-  // 7. PIES DE AMIGO (CARTELAS)
+  grupoBaseCompleta.add(meshBase);
+
+  // 4. PIES DE AMIGO (CARTELAS) TANGENCIALES AL TUBO
   const usarPie = params?.usarPieAmigo ?? true;
   const numPies = usarPie ? (parseInt(params?.cantPieAmigo, 10) || 4) : 0;
 
   if (numPies > 0 && loader) {
-    const esAleta = params?.tipoPieAmigo === 'aleta';
-    const archivoPie = esAleta ? '/models/PiealetaPrueba.glb' : '/models/PiePrueba.glb';
+    const tipoPie = String(params?.tipoPieAmigo || '').toLowerCase();
+    const esTriangular = tipoPie.includes('triang');
+    const archivoPie = esTriangular ? '/models/PiePrueba.glb' : '/models/PiealetaPrueba.glb';
 
-    loader.load(archivoPie, (gltfPie) => {
-      const pieModel = gltfPie.scene;
-      const boxP = new THREE.Box3().setFromObject(pieModel);
-      const sizeP = new THREE.Vector3();
-      boxP.getSize(sizeP);
+    loader.load(
+      archivoPie,
+      (gltfPie) => {
+        const pieModel = gltfPie.scene;
+        const boxP = new THREE.Box3().setFromObject(pieModel);
+        const sizeP = new THREE.Vector3();
+        boxP.getSize(sizeP);
 
-      const altoCartelaM = (parseFloat(params?.altoPieAmigo) || 10) / 100;
-      const espacioLibre = medioLado - radioTuboM;
-      
-      const escalaXZ = (espacioLibre * 0.85) / (Math.max(sizeP.x, sizeP.z) || 1);
-      const escalaY = altoCartelaM / (sizeP.y || 0.1);
+        // Altura de la cartela según params.altoPieAmigo (default 10 cm)
+        const altoCartelaM = (parseFloat(params?.altoPieAmigo) || 10) / 100;
+        const escalaYPie = altoCartelaM / (sizeP.y || 0.16);
 
-      let offsetAngulo = 0;
-      if (!esCuadrado && esExteriorCuadrado) {
-        offsetAngulo = Math.PI / 4; 
-      }
+        // Espacio radial disponible desde la pared exterior del tubo hasta el perímetro de la base
+        const espacioLibreM = Math.max(0.04, medioLado - radioTuboM);
+        const largoCartelaDeseadoM = espacioLibreM * 0.85;
+        const escalaZPie = largoCartelaDeseadoM / (sizeP.z || 0.10);
+        const escalaXPie = 1.0;
 
-      for (let i = 0; i < numPies; i++) {
-        const angulo = (i * 2 * Math.PI) / numPies + offsetAngulo;
-        const grupoRadial = new THREE.Group();
-        grupoRadial.rotation.y = angulo;
+        for (let i = 0; i < numPies; i++) {
+          const anguloRad = (i * 2 * Math.PI) / numPies;
+          const grupoRadial = new THREE.Group();
+          grupoRadial.rotation.y = anguloRad;
 
-        const pieInst = pieModel.clone();
-        pieInst.scale.set(escalaXZ, escalaY, escalaXZ);
-        
-        pieInst.position.set(
-          -boxP.min.x * escalaXZ,
-          espesorM,
-          radioTuboM - (boxP.min.z * escalaXZ)
-        );
+          const pieInst = pieModel.clone(true);
+          pieInst.scale.set(escalaXPie, escalaYPie, escalaZPie);
 
-        pieInst.traverse(c => { 
-          if (c.isMesh) {
-            c.material = matGenerico;
-            c.castShadow = true;
-            c.receiveShadow = true;
-          } 
-        });
-        grupoRadial.add(pieInst);
-        scene.add(grupoRadial);
-      }
-    });
+          // Apoyado sobre la superficie superior de la platina (Y = espesorM)
+          // y tangencial a la pared exterior del tubo (Z = radioTuboM)
+          pieInst.position.set(
+            -(boxP.min.x + boxP.max.x) / 2 * escalaXPie,
+            espesorM - (boxP.min.y * escalaYPie),
+            radioTuboM - (boxP.min.z * escalaZPie)
+          );
+
+          // Asignar el material de pintura seleccionado a todos los meshes hijos
+          pieInst.traverse((child) => {
+            if (child.isMesh) {
+              child.material = matGenerico;
+              child.castShadow = true;
+              child.receiveShadow = true;
+            }
+          });
+
+          grupoRadial.add(pieInst);
+          grupoBaseCompleta.add(grupoRadial);
+        }
+      },
+      undefined,
+      (err) => console.error(`Error al cargar pie de amigo (${archivoPie}):`, err)
+    );
   }
 }

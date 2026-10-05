@@ -1,4 +1,5 @@
 from sqlalchemy.orm import Session
+import models
 from pricing_laminas import obtener_precio_cm2_lamina
 from pricing_accesorios import calcular_costo_accesorios_bd
 
@@ -138,7 +139,8 @@ def calcular_precio_totem(params: dict, db: Session, nivel_precio: int | None = 
         else params.get("costo_fabricacion_fijo", 80000.0)
     )
 
-    costo_estructura_base = costo_lamina_cuerpo + costo_fabricacion_fijo
+    # Factor multiplicador de estructura (x2) para reflejar costos reales de fabricación
+    costo_estructura_base = (costo_lamina_cuerpo + costo_fabricacion_fijo) * 2.0
 
     # 2. Base rectangular paramétrica (anchoPlatina x fondoPlatina) y cartelas laterales en X
     obj_base = params.get("baseAnclaje") if isinstance(params.get("baseAnclaje"), dict) else params.get("platinaBase", {})
@@ -172,7 +174,7 @@ def calcular_precio_totem(params: dict, db: Session, nivel_precio: int | None = 
         pares_cartelas = int(params.get("paresCartelas") or obj_base.get("paresCartelas") or 2)
         cant_cartelas = pares_cartelas * 2
         alto_cartela_cm = float(params.get("altoCartela") or obj_base.get("altoCartela") or 18.0)
-        ala_cartela_cm = max((ancho_platina_cm - ancho_cm) / 2.0, 6.0)
+        ala_cartela_cm = max((fondo_platina_cm - fondo_cm) / 2.0, 6.0)
 
         lamina_base_id = (
             params.get("laminaAnclajeId")
@@ -194,24 +196,38 @@ def calcular_precio_totem(params: dict, db: Session, nivel_precio: int | None = 
         costo_accesorios_total_venta += p_base_venta
         accesorios_venta.append({
             "id": "platina_base_totem",
-            "nombre": f"Base Anclaje ({int(ancho_platina_cm)}x{int(fondo_platina_cm)} cm) + {pares_cartelas} Pares Cartelas Laterales",
+            "nombre": f"Base Anclaje ({int(ancho_platina_cm)}x{int(fondo_platina_cm)} cm) + {pares_cartelas} Pares Cartelas Frontal/Trasera",
             "cantidad": 1,
             "precioUnitario": p_base_venta,
             "precio": p_base_venta,
             "total": p_base_venta,
         })
 
-    # 3. Costo por cada hueco / mecanizado seleccionado (Frente y Posterior)
+    # 3. Costo por cada hueco / mecanizado seleccionado (Frente y Posterior) con sincronización dinámica de BD
     costo_hueco_estandar = float(params.get("costoHuecoEstandar", 35000.0) or 35000.0)
     costo_modulo_lpr = float(params.get("costoModuloLpr", 50000.0) or 50000.0)
+
+    catalogo_mecanizados = dict(CATALOGO_MECANIZADOS_TOTEM)
+    try:
+        if hasattr(models, 'MecanizadoTotem'):
+            mecanizados_bd = db.query(models.MecanizadoTotem).all()
+            for m in mecanizados_bd:
+                catalogo_mecanizados[m.clave] = {
+                    "nombre": m.nombre,
+                    "es_lpr": m.es_lpr,
+                    "area_m2": m.area_m2,
+                    "precio": m.precio
+                }
+    except Exception as e:
+        print(f"⚠️ Error cargando MecanizadoTotem desde BD: {e}")
 
     mecanizados_frente, mecanizados_traseros = _extraer_mecanizados_totem(params)
     area_mecanizados_m2 = 0.0
 
     for idx, clave_mec in enumerate(mecanizados_frente):
-        info = CATALOGO_MECANIZADOS_TOTEM.get(clave_mec, CATALOGO_MECANIZADOS_TOTEM["videoportero"])
-        costo_unit_base = costo_modulo_lpr if info["es_lpr"] else costo_hueco_estandar
-        area_mecanizados_m2 += float(info["area_m2"])
+        info = catalogo_mecanizados.get(clave_mec, catalogo_mecanizados.get("videoportero", CATALOGO_MECANIZADOS_TOTEM["videoportero"]))
+        costo_unit_base = float(info.get("precio", costo_modulo_lpr if info["es_lpr"] else costo_hueco_estandar))
+        area_mecanizados_m2 += float(info.get("area_m2", 0.08))
         p_venta_mec = round(costo_unit_base * factor_margen)
 
         costo_accesorios_total_venta += p_venta_mec
@@ -225,9 +241,9 @@ def calcular_precio_totem(params: dict, db: Session, nivel_precio: int | None = 
         })
 
     for idx, clave_mec in enumerate(mecanizados_traseros):
-        info = CATALOGO_MECANIZADOS_TOTEM.get(clave_mec, CATALOGO_MECANIZADOS_TOTEM["tapa_registro"])
-        costo_unit_base = costo_modulo_lpr if info["es_lpr"] else costo_hueco_estandar
-        area_mecanizados_m2 += float(info["area_m2"])
+        info = catalogo_mecanizados.get(clave_mec, catalogo_mecanizados.get("tapa_registro", CATALOGO_MECANIZADOS_TOTEM["tapa_registro"]))
+        costo_unit_base = float(info.get("precio", costo_modulo_lpr if info["es_lpr"] else costo_hueco_estandar))
+        area_mecanizados_m2 += float(info.get("area_m2", 0.12))
         p_venta_mec = round(costo_unit_base * factor_margen)
 
         costo_accesorios_total_venta += p_venta_mec
@@ -238,6 +254,38 @@ def calcular_precio_totem(params: dict, db: Session, nivel_precio: int | None = 
             "precioUnitario": p_venta_mec,
             "precio": p_venta_mec,
             "total": p_venta_mec,
+        })
+
+    # 3.1 Cámaras LPR Laterales (Izquierda / Derecha / Ambas)
+    camara_lpr_lateral = str(
+        params.get("camaraLPRLateral") or 
+        params.get("camara_lpr_lateral") or 
+        params.get("lprLateral") or 
+        ""
+    ).strip().lower()
+
+    if camara_lpr_lateral in ["izquierda", "derecha", "ambas"]:
+        cant_camaras = 2 if camara_lpr_lateral == "ambas" else 1
+        info_cam = catalogo_mecanizados.get("camara_lpr_lateral", {
+            "nombre": "Soporte y Mecanizado Cámara LPR Lateral",
+            "precio": 65000.0,
+            "area_m2": 0.05
+        })
+        costo_unit_cam = float(info_cam.get("precio", 65000.0))
+        area_mecanizados_m2 += float(info_cam.get("area_m2", 0.05)) * cant_camaras
+        p_unit_cam_venta = round(costo_unit_cam * factor_margen)
+        total_cam_venta = p_unit_cam_venta * cant_camaras
+
+        desc_lado = "Ambos Lados (Izq + Der)" if camara_lpr_lateral == "ambas" else ("Lado Izquierdo" if camara_lpr_lateral == "izquierda" else "Lado Derecho")
+
+        costo_accesorios_total_venta += total_cam_venta
+        accesorios_venta.append({
+            "id": f"camara_lpr_lateral_{camara_lpr_lateral}",
+            "nombre": f"Soporte y Mecanizado Cámara LPR Lateral ({desc_lado})",
+            "cantidad": cant_camaras,
+            "precioUnitario": p_unit_cam_venta,
+            "precio": total_cam_venta,
+            "total": total_cam_venta,
         })
 
     # 4. Accesorios adicionales de BD (si el usuario seleccionó alguno extra)

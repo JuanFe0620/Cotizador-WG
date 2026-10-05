@@ -19,6 +19,7 @@ export default function Configurador({
   tubos = [], 
   pinturas = [], 
   accesorios = [], 
+  bujes: propBujes = [],
   handleAgregar,
   cargando = false
 }) {
@@ -35,21 +36,24 @@ export default function Configurador({
   const [laminaAnclajeId, setLaminaAnclajeId] = useState(params.laminaAnclajeId || '');
   const [ubicacion, setUbicacion] = useState(params.ubicacion || (esBrazo ? 'suspendido' : 'suelo'));
   
-  const [bujes, setBujes] = useState([]);
+  const [bujesLocales, setBujesLocales] = useState([]);
+  const bujes = (propBujes && propBujes.length > 0) ? propBujes : bujesLocales;
 
   useEffect(() => {
-    fetch(`${API_BASE_URL}/api/bujes`)
-      .then(res => {
-        if (!res.ok) return fetch(`${API_BASE_URL}/bujes`);
-        return res;
-      })
-      .then(res => {
-        if (!res.ok) throw new Error("Error consultando bujes");
-        return res.json();
-      })
-      .then(data => setBujes(data))
-      .catch(err => console.error("Error al obtener los bujes:", err));
-  }, []);
+    if (!propBujes || propBujes.length === 0) {
+      fetch(`${API_BASE_URL}/api/bujes`)
+        .then(res => {
+          if (!res.ok) return fetch(`${API_BASE_URL}/bujes`);
+          return res;
+        })
+        .then(res => {
+          if (!res.ok) throw new Error("Error consultando bujes");
+          return res.json();
+        })
+        .then(data => setBujesLocales(data))
+        .catch(err => console.error("Error al obtener los bujes:", err));
+    }
+  }, [propBujes]);
 
   // Sincronizar ubicación inicial hacia el visor si aún no está definida en params
   useEffect(() => {
@@ -353,6 +357,18 @@ export default function Configurador({
       const cant = cantidadesAcc[accId] || (typeof accItem === 'object' ? accItem.cantidad : 1) || 1;
       return { id: accId, cantidad: cant };
     });
+
+    if (params.caperuzaBase) {
+      if (!listaAcc.some(a => String(a.id || '').toLowerCase().includes('caperuza'))) {
+        listaAcc.push({ id: 'Caperuza / Cubre-anclaje Embellecedora', cantidad: 1 });
+      }
+    }
+    if (params.videoporteroPunta) {
+      if (!listaAcc.some(a => String(a.id || '').toLowerCase().includes('videoportero')) &&
+          !bujesSeleccionadosLimpios.some(b => String(b).toLowerCase().includes('videoportero'))) {
+        listaAcc.push({ id: 'Soporte Caja Videoportero en Punta', cantidad: 1 });
+      }
+    }
 
     // 3. Tramos
     const tramosLista = (params.tramos || []).map(t => {

@@ -1,27 +1,72 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Trash2, FileText, ShoppingBag, Download, UserPlus, Search, UserCheck } from 'lucide-react';
+import { Trash2, FileText, ShoppingBag, Download, UserPlus, Search, UserCheck, Edit3, Check, RotateCcw, Briefcase, Compass } from 'lucide-react';
 import { exportarPdfTecnico } from '/src/utils/pdfService.js';
 
-export default function Resumen({ items = [], setItems, consecutivo = 'COT-2001', setConsecutivo, visorRef, onGuardarCotizacion }) {
-  const [clienteSeleccionado, setClienteSeleccionado] = useState(null);
+export const LISTA_VENDEDORES = [
+  "ZAPATA CARRANZA PAOLA KATHERINE - 0012",
+  "CORTES TORRES SANDRA PATRICIA - 0013",
+  "DUARTE RODRIGUEZ GUILLERMO - 0011",
+  "FARFAN CIFUENTES CRISTIAN FELIPE - 0008",
+  "GARCIA RAYO JUAN FELIPE - 0006",
+  "GARCIA CARRANZA WILFRED HERNANDO - 0002",
+  "RAMIREZ CARRANZA NORA VIVIANA - 0016"
+];
+
+export const LISTA_DISENADORES = [
+  "WILFRED GARCIA",
+  "LINA PUELLO",
+  "INGENIERÍA WG"
+];
+
+export default function Resumen({ 
+  items = [], 
+  setItems, 
+  consecutivo = 'COT-2001', 
+  setConsecutivo, 
+  visorRef, 
+  onGuardarCotizacion,
+  clienteSeleccionado: clienteProp,
+  setClienteSeleccionado: setClienteProp,
+  notas: notasProp,
+  setNotas: setNotasProp,
+  vendedor: vendedorProp,
+  disenador: disenadorProp,
+  API_BASE_URL = 'http://127.0.0.1:8000'
+}) {
+  const [clienteInterno, setClienteInterno] = useState(null);
+  const clienteSeleccionado = clienteProp !== undefined ? clienteProp : clienteInterno;
+  const setClienteSeleccionado = setClienteProp || setClienteInterno;
+
+  const [notasInterno, setNotasInterno] = useState('');
+  const notas = notasProp !== undefined ? notasProp : notasInterno;
+  const setNotas = setNotasProp || setNotasInterno;
+
+  const [vendedorSeleccionado, setVendedorSeleccionado] = useState(vendedorProp || LISTA_VENDEDORES[0]);
+  const [disenadorSeleccionado, setDisenadorSeleccionado] = useState(disenadorProp || LISTA_DISENADORES[0]);
+
   const [modalCliente, setModalCliente] = useState(false);
   const [clientes, setClientes] = useState([]);
   const [busqueda, setBusqueda] = useState('');
   const [nuevoCliente, setNuevoCliente] = useState({ nit_cedula: '', nombre: '', telefono: '', direccion: '' });
   const [generandoPdf, setGenerandoPdf] = useState(false);
   const [guardandoCliente, setGuardandoCliente] = useState(false);
-  const [notas, setNotas] = useState('');
+  const [guardandoBD, setGuardandoBD] = useState(false);
+  const [mensajeGuardado, setMensajeGuardado] = useState(null);
+  const [editandoIdx, setEditandoIdx] = useState(null);
+  const [precioTemp, setPrecioTemp] = useState('');
+
+  const baseUrl = API_BASE_URL || 'http://127.0.0.1:8000';
 
   useEffect(() => {
     let active = true;
-    fetch('http://127.0.0.1:8000/api/clientes')
+    fetch(`${baseUrl}/api/clientes`)
       .then(res => res.json())
       .then(data => {
         if (active && Array.isArray(data)) setClientes(data);
       })
       .catch((err) => console.error("Error cargando clientes:", err));
     return () => { active = false; };
-  }, []);
+  }, [baseUrl]);
 
   const formatoMoneda = useCallback((valor) => {
     return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(valor || 0);
@@ -34,16 +79,7 @@ export default function Resumen({ items = [], setItems, consecutivo = 'COT-2001'
   const obtenerNit = useCallback((c) => c?.nit || c?.nit_cedula || c?.NIT || '', []);
   const limpiarNit = useCallback((val) => String(val || '').replace(/[\s.,-]/g, ''), []);
 
-  const cambiarCantidadItem = (index, nuevaCant) => {
-    const val = Math.max(1, parseInt(nuevaCant) || 1);
-    setItems(prev => {
-      const copia = [...prev];
-      copia[index] = { ...copia[index], cantidad: val };
-      return copia;
-    });
-  };
-
-const obtenerValoresComerciales = useCallback((item) => {
+  const obtenerValoresComerciales = useCallback((item) => {
     const cantItem = Math.max(1, parseInt(item.cantidad || item.detalles?.cantidad || 1, 10));
 
     const parseSeguro = (val) => {
@@ -96,17 +132,102 @@ const obtenerValoresComerciales = useCallback((item) => {
     const pinturaVenta = Math.round(basePintura * cantItem);
     const accesoriosVenta = Math.round((costoAccesoriosTotal + precioBrazo) * cantItem);
 
-    const precioTotalItem = estructuraVenta + pinturaVenta + accesoriosVenta;
+    const precioCalculado = estructuraVenta + pinturaVenta + accesoriosVenta;
+
+    // Verificar si el usuario ha sobrescrito el precio manualmente
+    const precioPers = item.precio_personalizado ?? item.precioPersonalizado;
+    const esEditado = precioPers !== undefined && precioPers !== null && !isNaN(Number(precioPers));
+    const precioTotalItem = esEditado ? Math.round(Number(precioPers)) : precioCalculado;
 
     return {
       cantItem,
       estructuraVenta,
       pinturaVenta,
       accesoriosVenta,
+      precioCalculado,
       precioTotalItem,
+      esEditado,
       accesoriosLimpios: accesorios
     };
-  }, []); 
+  }, []);
+
+  const cambiarCantidadItem = (index, nuevaCant) => {
+    const val = Math.max(1, parseInt(nuevaCant) || 1);
+    setItems(prev => {
+      const copia = [...prev];
+      const it = copia[index];
+      const precioPers = it.precio_personalizado ?? it.precioPersonalizado;
+      if (precioPers !== undefined && precioPers !== null && !isNaN(Number(precioPers))) {
+        const cantAnt = Math.max(1, parseInt(it.cantidad || it.detalles?.cantidad || 1, 10));
+        const unitario = it.precio_unitario || Math.round(Number(precioPers) / cantAnt);
+        const nuevoTotal = Math.round(unitario * val);
+        copia[index] = {
+          ...it,
+          cantidad: val,
+          precio_personalizado: nuevoTotal,
+          precioPersonalizado: nuevoTotal,
+          total: nuevoTotal,
+          subtotal: nuevoTotal,
+          precio_unitario: unitario
+        };
+      } else {
+        copia[index] = { ...it, cantidad: val };
+      }
+      return copia;
+    });
+  };
+
+  const handleEditarPrecioItem = useCallback((index, nuevoValor) => {
+    setItems(prev => {
+      const copia = [...prev];
+      const it = copia[index];
+      if (!it) return prev;
+      const cant = Math.max(1, parseInt(it.cantidad || it.detalles?.cantidad || 1, 10));
+
+      if (nuevoValor === null || nuevoValor === '' || isNaN(Number(nuevoValor))) {
+        // Restablecer al precio original calculado
+        const { precioCalculado } = obtenerValoresComerciales({
+          ...it,
+          precio_personalizado: null,
+          precioPersonalizado: null
+        });
+        copia[index] = {
+          ...it,
+          precio_personalizado: null,
+          precioPersonalizado: null,
+          total: precioCalculado,
+          subtotal: precioCalculado,
+          precio_unitario: Math.round(precioCalculado / cant)
+        };
+      } else {
+        const numVal = Math.max(0, Math.round(Number(nuevoValor)));
+        copia[index] = {
+          ...it,
+          precio_personalizado: numVal,
+          precioPersonalizado: numVal,
+          total: numVal,
+          subtotal: numVal,
+          precio_unitario: Math.round(numVal / cant)
+        };
+      }
+      return copia;
+    });
+  }, [obtenerValoresComerciales]);
+
+  const iniciarEdicionPrecio = (index, precioActual) => {
+    setEditandoIdx(index);
+    setPrecioTemp(String(precioActual));
+  };
+
+  const guardarEdicionPrecio = (index) => {
+    handleEditarPrecioItem(index, precioTemp);
+    setEditandoIdx(null);
+  };
+
+  const cancelarEdicionPrecio = () => {
+    setEditandoIdx(null);
+    setPrecioTemp('');
+  };
 
   const totalCotizacion = useMemo(() => {
     return items.reduce((acc, item) => {
@@ -254,7 +375,7 @@ const obtenerValoresComerciales = useCallback((item) => {
     };
 
     try {
-      const res = await fetch('http://127.0.0.1:8000/api/clientes', {
+      const res = await fetch(`${baseUrl}/api/clientes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -273,27 +394,174 @@ const obtenerValoresComerciales = useCallback((item) => {
     }
   };
 
-  const handleExportarPDF = () => {
-    exportarPdfTecnico({
-      items,
-      totalCotizacion,
-      consecutivo,
-      clienteSeleccionado,
-      notas,
-      observaciones: notas,
-      notasObservaciones: notas,
-      obtenerNit,
-      obtenerValoresComerciales,
-      formatoCalibreTexto,
-      obtenerObjetoBase,
-      obtenerDetalleTramo,
-      obtenerDetalleBase,
-      obtenerDetalleCartelas,
-      numeroALetrasCOP,
-      formatoMonedaSinSimbolo,
-      visorRef,
-      setGenerandoPdf
-    });
+  const guardarCotizacionBD = async (silencioso = false) => {
+    if (items.length === 0) {
+      if (!silencioso) alert("No hay ítems para guardar en la cotización.");
+      return null;
+    }
+
+    setGuardandoBD(true);
+    try {
+      const itemsPayload = items.map(item => {
+        const { precioTotalItem } = obtenerValoresComerciales(item);
+        const configItem = item.configuracion || item.params || item.detalles || item;
+
+        const paramsCompletos = {
+          ...configItem,
+          categoria: item.categoria || configItem.categoria,
+          alto: item.alto ?? configItem.alto,
+          ancho: item.ancho ?? configItem.ancho,
+          fondo: item.fondo ?? configItem.fondo,
+          laminaId: item.laminaId ?? configItem.laminaId,
+          lamina: item.lamina ?? configItem.lamina,
+          pintura: item.pintura ?? configItem.pintura,
+          colorPintura: item.colorPintura ?? configItem.colorPintura,
+          nombrePintura: item.nombrePintura ?? configItem.nombrePintura,
+          tramos: item.tramos || configItem.tramos || [],
+          formaBase: item.formaBase || configItem.formaBase,
+          ladoBase: item.ladoBase ?? configItem.ladoBase,
+          incluirBase: item.incluirBase ?? configItem.incluirBase,
+          incluirPlatina: item.incluirPlatina ?? configItem.incluirPlatina,
+          incluirPiesAmigo: item.incluirPiesAmigo ?? configItem.incluirPiesAmigo,
+          cantidadPies: item.cantidadPies ?? configItem.cantidadPies,
+          altoCartela: item.altoCartela ?? configItem.altoCartela,
+          bujesSeleccionados: item.bujesSeleccionados || configItem.bujesSeleccionados || [],
+          bujeInicialId: item.bujeInicialId || configItem.bujeInicialId || '',
+          bujeFinalId: item.bujeFinalId || configItem.bujeFinalId || '',
+          accesoriosSeleccionados: item.accesoriosSeleccionados || configItem.accesoriosSeleccionados || [],
+          detallesAccesorios: item.detallesAccesorios || configItem.detallesAccesorios || {},
+          cantidadesAcc: item.cantidadesAcc || configItem.cantidadesAcc || {},
+          incluirBioporter: item.incluirBioporter ?? configItem.incluirBioporter,
+          precio_personalizado: item.precio_personalizado,
+          cantidad: item.cantidad || 1
+        };
+
+        return {
+          categoria: item.categoria || 'GABINETES',
+          descripcion: item.descripcion || 'Estructura Metalmecánica',
+          lamina: item.lamina || '',
+          pintura: item.pintura || '',
+          costoPintura: item.costoPintura || 0,
+          costoTubos: item.costoTubos || 0,
+          areaPintable: item.areaPintable || 0,
+          alto: item.alto || 0,
+          ancho: item.ancho || 0,
+          fondo: item.fondo || 0,
+          costoBase: item.costoBase || 0,
+          total: precioTotalItem,
+          accesoriosLista: item.accesoriosLista || item.accesorios_lista || item.detalles?.accesoriosLista || [],
+          configuracion: paramsCompletos,
+          params: paramsCompletos
+        };
+      });
+
+      const url = `${baseUrl}/api/cotizaciones/guardar`;
+      const payload = {
+        consecutivo: consecutivo,
+        cliente_id: clienteSeleccionado?.id || null,
+        clienteId: clienteSeleccionado?.id || null,
+        clienteNombre: clienteSeleccionado?.nombre || 'Consumidor Final / Mostrador',
+        cliente_nombre: clienteSeleccionado?.nombre || 'Consumidor Final / Mostrador',
+        clienteNit: obtenerNit(clienteSeleccionado) || null,
+        cliente_nit: obtenerNit(clienteSeleccionado) || null,
+        vendedor: vendedorSeleccionado,
+        disenador: disenadorSeleccionado,
+        observaciones: notas || '',
+        notas: notas || '',
+        nivelPrecio: 1,
+        total: totalCotizacion,
+        items: itemsPayload
+      };
+
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`Error ${res.status}: ${errorText}`);
+      }
+
+      const data = await res.json();
+
+      if (data.consecutivo_guardado) {
+        setConsecutivo(data.consecutivo_guardado);
+      }
+
+      if (!silencioso) {
+        setMensajeGuardado(data.mensaje || `Cotización ${data.consecutivo_guardado || consecutivo} guardada con éxito`);
+        setTimeout(() => setMensajeGuardado(null), 3500);
+      }
+
+      if (onGuardarCotizacion) {
+        try {
+          onGuardarCotizacion(data);
+        } catch (e) {
+          console.warn("Callback onGuardarCotizacion warning:", e);
+        }
+      }
+
+      return data;
+    } catch (e) {
+      console.error("Error al guardar cotización:", e);
+      if (!silencioso) {
+        alert("Error al conectar con la base de datos para guardar la cotización: " + e.message);
+      }
+      return null;
+    } finally {
+      setGuardandoBD(false);
+    }
+  };
+
+  const handleExportarPDF = async () => {
+    if (items.length === 0) {
+      alert("No hay ítems para exportar.");
+      return;
+    }
+
+    setGenerandoPdf(true);
+    let consecutivoFinal = consecutivo;
+
+    try {
+      // 1. Guardar primero automáticamente en base de datos
+      const dataGuardado = await guardarCotizacionBD(true);
+      if (dataGuardado && dataGuardado.consecutivo_guardado) {
+        consecutivoFinal = dataGuardado.consecutivo_guardado;
+        setConsecutivo(consecutivoFinal);
+      }
+
+      // 2. Exportar el PDF con el consecutivo confirmado, vendedor y diseñador
+      exportarPdfTecnico({
+        items,
+        totalCotizacion,
+        consecutivo: consecutivoFinal,
+        clienteSeleccionado,
+        vendedor: vendedorSeleccionado,
+        vendedorSeleccionado: vendedorSeleccionado,
+        disenador: disenadorSeleccionado,
+        disenadorSeleccionado: disenadorSeleccionado,
+        notas,
+        observaciones: notas,
+        notasObservaciones: notas,
+        obtenerNit,
+        obtenerValoresComerciales,
+        formatoCalibreTexto,
+        obtenerObjetoBase,
+        obtenerDetalleTramo,
+        obtenerDetalleBase,
+        obtenerDetalleCartelas,
+        numeroALetrasCOP,
+        formatoMonedaSinSimbolo,
+        visorRef,
+        setGenerandoPdf
+      });
+    } catch (err) {
+      console.error("Error al exportar PDF:", err);
+      setGenerandoPdf(false);
+      alert("Error al generar PDF: " + err.message);
+    }
   };
 
   const clientesFiltrados = useMemo(() => {
@@ -356,6 +624,41 @@ const obtenerValoresComerciales = useCallback((item) => {
         </button>
       </div>
 
+      {/* SECCIÓN RESPONSABLES: ASESOR COMERCIAL Y DISEÑADOR */}
+      <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl space-y-2.5">
+        <div>
+          <label className="text-[10px] uppercase font-bold text-slate-500 flex items-center gap-1 mb-1 tracking-wider">
+            <Briefcase size={12} className="text-blue-600" />
+            Asesor / Vendedor
+          </label>
+          <select
+            value={vendedorSeleccionado}
+            onChange={(e) => setVendedorSeleccionado(e.target.value)}
+            className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1.5 text-xs text-slate-800 font-semibold outline-none focus:border-blue-500 shadow-sm cursor-pointer"
+          >
+            {LISTA_VENDEDORES.map((v, idx) => (
+              <option key={idx} value={v}>{v}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className="text-[10px] uppercase font-bold text-slate-500 flex items-center gap-1 mb-1 tracking-wider">
+            <Compass size={12} className="text-blue-600" />
+            Diseñador / Dibujante
+          </label>
+          <select
+            value={disenadorSeleccionado}
+            onChange={(e) => setDisenadorSeleccionado(e.target.value)}
+            className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1.5 text-xs text-slate-800 font-semibold outline-none focus:border-blue-500 shadow-sm cursor-pointer"
+          >
+            {LISTA_DISENADORES.map((d, idx) => (
+              <option key={idx} value={d}>{d}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
       {/* LISTA DE ÍTEMS AGREGADOS */}
       <div className="flex-1 overflow-y-auto space-y-3 pr-1">
         {items.length === 0 ? (
@@ -365,7 +668,7 @@ const obtenerValoresComerciales = useCallback((item) => {
           </div>
         ) : (
           items.map((item, index) => {
-            const { cantItem, estructuraVenta, pinturaVenta, accesoriosVenta, precioTotalItem, accesoriosLimpios } = obtenerValoresComerciales(item);
+            const { cantItem, estructuraVenta, pinturaVenta, accesoriosVenta, precioCalculado, precioTotalItem, esEditado, accesoriosLimpios } = obtenerValoresComerciales(item);
             const tramos = item.tramos || item.detalles?.tramos || [];
             const baseObj = obtenerObjetoBase(item);
             const categoria = (item.categoria || '').toLowerCase();
@@ -452,9 +755,80 @@ const obtenerValoresComerciales = useCallback((item) => {
                   <div>Acc/Comp: <span className="font-bold text-slate-700">{formatoMoneda(accesoriosVenta)}</span></div>
                 </div>
 
-                <div className="flex justify-between items-center pt-1 text-xs">
-                  <span className="font-bold text-slate-700">Subtotal Ítem (x{cantItem}):</span>
-                  <span className="font-extrabold text-blue-600">{formatoMoneda(precioTotalItem)}</span>
+                <div className="flex justify-between items-center pt-2 text-xs border-t border-slate-100">
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-bold text-slate-700">Subtotal Ítem (x{cantItem}):</span>
+                    {esEditado && (
+                      <span className="bg-amber-100 text-amber-800 text-[9px] font-bold px-1.5 py-0.5 rounded border border-amber-300">
+                        Manual
+                      </span>
+                    )}
+                  </div>
+
+                  {editandoIdx === index ? (
+                    <div className="flex items-center gap-1">
+                      <div className="relative flex items-center">
+                        <span className="absolute left-2 text-[11px] text-slate-400 font-bold">$</span>
+                        <input
+                          type="number"
+                          autoFocus
+                          value={precioTemp}
+                          onChange={(e) => setPrecioTemp(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') guardarEdicionPrecio(index);
+                            if (e.key === 'Escape') cancelarEdicionPrecio();
+                          }}
+                          className="w-28 pl-5 pr-1 py-1 text-xs font-bold text-blue-700 bg-white border border-blue-500 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 shadow-sm"
+                          placeholder="Valor total"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => guardarEdicionPrecio(index)}
+                        title="Guardar precio personalizado"
+                        className="p-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg shadow-sm transition"
+                      >
+                        <Check size={12} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={cancelarEdicionPrecio}
+                        title="Cancelar edición"
+                        className="p-1.5 bg-slate-200 hover:bg-slate-300 text-slate-600 rounded-lg transition"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1.5">
+                      {esEditado && precioCalculado !== precioTotalItem && (
+                        <span className="line-through text-slate-400 text-[10px]" title="Precio calculado sugerido">
+                          {formatoMoneda(precioCalculado)}
+                        </span>
+                      )}
+                      <span className={`font-extrabold ${esEditado ? 'text-amber-600' : 'text-blue-600'}`}>
+                        {formatoMoneda(precioTotalItem)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => iniciarEdicionPrecio(index, precioTotalItem)}
+                        title="Sobrescribir precio manualmente"
+                        className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition"
+                      >
+                        <Edit3 size={13} />
+                      </button>
+                      {esEditado && (
+                        <button
+                          type="button"
+                          onClick={() => handleEditarPrecioItem(index, null)}
+                          title="Restablecer precio al valor sugerido"
+                          className="p-1 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition"
+                        >
+                          <RotateCcw size={12} />
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -493,23 +867,30 @@ const obtenerValoresComerciales = useCallback((item) => {
       </div>
 
       {/* BOTONES DE ACCIÓN */}
-      <div className="grid grid-cols-2 gap-2 pt-1">
-        <button
-          onClick={onGuardarCotizacion}
-          disabled={items.length === 0}
-          className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 text-white disabled:text-slate-400 font-bold py-2.5 rounded-xl transition flex items-center justify-center gap-1.5 shadow-sm text-xs"
-        >
-          Guardar BD
-        </button>
+      <div className="flex flex-col gap-1.5 pt-1">
+        {mensajeGuardado && (
+          <div className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg p-1.5 text-center transition">
+            {mensajeGuardado}
+          </div>
+        )}
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            onClick={() => guardarCotizacionBD(false)}
+            disabled={guardandoBD || items.length === 0}
+            className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 text-white disabled:text-slate-400 font-bold py-2.5 rounded-xl transition flex items-center justify-center gap-1.5 shadow-sm text-xs"
+          >
+            {guardandoBD ? 'Guardando...' : 'Guardar BD'}
+          </button>
 
-        <button
-          onClick={handleExportarPDF}
-          disabled={generandoPdf || items.length === 0}
-          className="bg-slate-800 hover:bg-slate-900 disabled:bg-slate-200 text-white disabled:text-slate-400 font-bold py-2.5 rounded-xl transition flex items-center justify-center gap-1.5 shadow-sm text-xs"
-        >
-          <Download size={14} />
-          {generandoPdf ? 'Generando...' : 'Exportar PDF'}
-        </button>
+          <button
+            onClick={handleExportarPDF}
+            disabled={generandoPdf || guardandoBD || items.length === 0}
+            className="bg-slate-800 hover:bg-slate-900 disabled:bg-slate-200 text-white disabled:text-slate-400 font-bold py-2.5 rounded-xl transition flex items-center justify-center gap-1.5 shadow-sm text-xs"
+          >
+            <Download size={14} />
+            {generandoPdf ? 'Generando...' : 'Exportar PDF'}
+          </button>
+        </div>
       </div>
 
       {/* MODAL SELECCIÓN / CREACIÓN CLIENTE */}

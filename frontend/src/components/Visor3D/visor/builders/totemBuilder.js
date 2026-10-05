@@ -73,6 +73,10 @@ function extraerMecanizadosPorCara(params = {}) {
  * Construye la placa base rectangular paramétrica (anchoPlatina en X, fondoPlatina en Z)
  * y los pies de amigo / cartelas en los costados laterales (-X y +X) con perforaciones circulares alineadas.
  */
+/**
+ * Construye la placa base rectangular paramétrica (anchoPlatina en X, fondoPlatina en Z)
+ * y los pies de amigo / cartelas en las caras frontal (+Z) y trasera (-Z) reforzando hacia adelante y atrás.
+ */
 function construirBaseYCartelasLaterales({
   anchoM,
   fondoM,
@@ -84,10 +88,10 @@ function construirBaseYCartelasLaterales({
   matOscuro
 }) {
   const grupoBase = new THREE.Group();
-  grupoBase.name = 'TotemBaseYCartelasLaterales';
+  grupoBase.name = 'TotemBaseYCartelas';
 
-  const baseAnchoM = Math.max(anchoPlatinaM, anchoM + 0.08);
-  const baseFondoM = Math.max(fondoPlatinaM, fondoM + 0.04);
+  const baseAnchoM = Math.max(anchoPlatinaM, anchoM + 0.04);
+  const baseFondoM = Math.max(fondoPlatinaM, fondoM + 0.08);
   const rEsquina = 0.014;
 
   const hw = baseAnchoM / 2;
@@ -106,8 +110,8 @@ function construirBaseYCartelasLaterales({
   placaShape.quadraticCurveTo(-hw, -hd, -hw + rEsquina, -hd);
 
   // 4 perforaciones de anclaje en las esquinas de la platina
-  const offsetHoleX = Math.max(hw - 0.025, anchoM / 2 + 0.02);
-  const offsetHoleZ = Math.max(hd - 0.024, 0.03);
+  const offsetHoleX = Math.max(hw - 0.024, anchoM / 2 + 0.02);
+  const offsetHoleZ = Math.max(hd - 0.025, fondoM / 2 + 0.02);
   const radioPerforacionBase = 0.0075;
 
   const coordsAnclajes = [
@@ -137,31 +141,31 @@ function construirBaseYCartelasLaterales({
   placaMesh.receiveShadow = true;
   grupoBase.add(placaMesh);
 
-  // Pies de amigo / Cartelas laterales en el eje X (izquierda -X y derecha +X)
-  const alaDisponibleX = Math.max((baseAnchoM - anchoM) / 2 - 0.008, 0.045);
+  // Pies de amigo / Cartelas en el eje Z (Frontal +Z y Trasera -Z reforzando hacia adelante y atrás)
+  const alaDisponibleZ = Math.max((baseFondoM - fondoM) / 2 - 0.008, 0.045);
   const altoCartelaM = 0.18;
   const espesorCartelaM = 0.005;
 
-  // Perfil 2D de la cartela en el plano X-Y:
-  // x va desde 0 (pared lateral de la columna) hasta alaDisponibleX (hacia el borde lateral de la platina)
+  // Perfil 2D de la cartela:
+  // x va desde 0 (pared frontal/trasera de la columna) hasta alaDisponibleZ (hacia el borde de la platina)
   // y va desde 0 (sobre la platina) hasta altoCartelaM (sobre la columna)
   const cartelaShape = new THREE.Shape();
   cartelaShape.moveTo(0, 0);
-  cartelaShape.lineTo(alaDisponibleX, 0);
-  cartelaShape.lineTo(alaDisponibleX, 0.022);
+  cartelaShape.lineTo(alaDisponibleZ, 0);
+  cartelaShape.lineTo(alaDisponibleZ, 0.022);
   cartelaShape.lineTo(0.016, altoCartelaM);
   cartelaShape.lineTo(0, altoCartelaM);
   cartelaShape.closePath();
 
   // Perforaciones circulares alineadas en las cartelas
-  const rHoleInf = Math.min(alaDisponibleX * 0.19, 0.011);
+  const rHoleInf = Math.min(alaDisponibleZ * 0.19, 0.011);
   const agujeroInf = new THREE.Path();
-  agujeroInf.absarc(alaDisponibleX * 0.42, altoCartelaM * 0.27, rHoleInf, 0, Math.PI * 2, false);
+  agujeroInf.absarc(alaDisponibleZ * 0.42, altoCartelaM * 0.27, rHoleInf, 0, Math.PI * 2, false);
   cartelaShape.holes.push(agujeroInf);
 
-  const rHoleSup = Math.min(alaDisponibleX * 0.14, 0.008);
+  const rHoleSup = Math.min(alaDisponibleZ * 0.14, 0.008);
   const agujeroSup = new THREE.Path();
-  agujeroSup.absarc(alaDisponibleX * 0.28, altoCartelaM * 0.57, rHoleSup, 0, Math.PI * 2, false);
+  agujeroSup.absarc(alaDisponibleZ * 0.28, altoCartelaM * 0.57, rHoleSup, 0, Math.PI * 2, false);
   cartelaShape.holes.push(agujeroSup);
 
   const cartelaGeo = new THREE.ExtrudeGeometry(cartelaShape, {
@@ -171,25 +175,29 @@ function construirBaseYCartelasLaterales({
     bevelSize: 0.001,
     bevelSegments: 1
   });
-  // Centrar espesor de la cartela en Z
+  // Centrar espesor de la cartela en Z local
   cartelaGeo.translate(0, 0, -espesorCartelaM / 2);
 
-  const posicionesZ =
-    Number(paresCartelas) === 1 ? [0] : [-fondoM * 0.28, fondoM * 0.28];
+  const posicionesX =
+    Number(paresCartelas) === 1 ? [0] : [-anchoM * 0.28, anchoM * 0.28];
 
-  // Costado derecho (+X) y costado izquierdo (-X)
-  [1, -1].forEach((signoX) => {
-    posicionesZ.forEach((zPos) => {
-      const cartelaMesh = new THREE.Mesh(cartelaGeo, matPrincipal);
-      cartelaMesh.position.set(signoX * (anchoM / 2), espesorPlacaM, zPos);
-      // En el costado izquierdo (-X), rotar 180° en Y para que el ala apunte hacia -X
-      if (signoX < 0) {
-        cartelaMesh.rotation.y = Math.PI;
-      }
-      cartelaMesh.castShadow = true;
-      cartelaMesh.receiveShadow = true;
-      grupoBase.add(cartelaMesh);
-    });
+  // Cara frontal (+Z) y cara trasera (-Z)
+  posicionesX.forEach((xPos) => {
+    // Cartela frontal (+Z reforzando hacia adelante)
+    const cartelaFrontal = new THREE.Mesh(cartelaGeo, matPrincipal);
+    cartelaFrontal.position.set(xPos, espesorPlacaM, fondoM / 2);
+    cartelaFrontal.rotation.y = -Math.PI / 2;
+    cartelaFrontal.castShadow = true;
+    cartelaFrontal.receiveShadow = true;
+    grupoBase.add(cartelaFrontal);
+
+    // Cartela trasera (-Z reforzando hacia atrás)
+    const cartelaTrasera = new THREE.Mesh(cartelaGeo, matPrincipal);
+    cartelaTrasera.position.set(xPos, espesorPlacaM, -fondoM / 2);
+    cartelaTrasera.rotation.y = Math.PI / 2;
+    cartelaTrasera.castShadow = true;
+    cartelaTrasera.receiveShadow = true;
+    grupoBase.add(cartelaTrasera);
   });
 
   // Pernos de anclaje en las 4 esquinas
@@ -201,6 +209,91 @@ function construirBaseYCartelasLaterales({
   });
 
   return grupoBase;
+}
+
+/**
+ * Construye una cámara LPR montada en el lateral (eje X) con soporte saliente.
+ */
+function construirCamaraLPRLateral({
+  lado = 'derecha',
+  altoM,
+  anchoM,
+  fondoM,
+  matPrincipal,
+  matMarco,
+  matOscuro,
+  matLed
+}) {
+  const grupoCamara = new THREE.Group();
+  grupoCamara.name = `CamaraLPRLateral_${lado}`;
+  const signoX = lado === 'izquierda' ? -1 : 1;
+
+  // Altura ergonómica de detección LPR vehicular/acceso (~78% de la columna o ~1.25m)
+  const yCamara = Math.min(altoM - 0.20, Math.max(altoM * 0.78, 1.15));
+  const xColumna = signoX * (anchoM / 2);
+
+  // 1. Brida metálica de montaje en la cara lateral de la columna
+  const bridaGeo = new THREE.BoxGeometry(0.008, 0.08, 0.08);
+  const bridaMesh = new THREE.Mesh(bridaGeo, matMarco);
+  bridaMesh.position.set(xColumna + signoX * 0.004, yCamara, 0);
+  bridaMesh.castShadow = true;
+  grupoCamara.add(bridaMesh);
+
+  // 2. Brazo tubular saliente hacia el lateral (+X o -X)
+  const largoBrazoM = 0.14;
+  const brazoGeo = new THREE.CylinderGeometry(0.013, 0.013, largoBrazoM, 16);
+  brazoGeo.rotateZ(Math.PI / 2);
+  const brazoMesh = new THREE.Mesh(brazoGeo, matPrincipal);
+  brazoMesh.position.set(xColumna + signoX * (largoBrazoM / 2), yCamara, 0);
+  brazoMesh.castShadow = true;
+  grupoCamara.add(brazoMesh);
+
+  // 3. Rótula articulada de orientación
+  const rotulaGeo = new THREE.SphereGeometry(0.018, 16, 16);
+  const rotulaMesh = new THREE.Mesh(rotulaGeo, matMarco);
+  rotulaMesh.position.set(xColumna + signoX * largoBrazoM, yCamara, 0);
+  grupoCamara.add(rotulaMesh);
+
+  // 4. Carcasa Cámara LPR Tipo Bullet orientada hacia adelante (+Z vehicular)
+  const grupoCarcasa = new THREE.Group();
+  grupoCarcasa.position.set(xColumna + signoX * largoBrazoM, yCamara, 0);
+  grupoCarcasa.rotation.y = -signoX * 0.12; // Leve convergencia hacia el centro del carril
+  grupoCarcasa.rotation.x = 0.08;          // Leve inclinación hacia abajo
+
+  // Cuerpo de la cámara
+  const cuerpoGeo = new THREE.BoxGeometry(0.062, 0.052, 0.15);
+  const cuerpoMesh = new THREE.Mesh(cuerpoGeo, matPrincipal);
+  cuerpoMesh.position.set(0, 0, 0.05);
+  cuerpoMesh.castShadow = true;
+  grupoCarcasa.add(cuerpoMesh);
+
+  // Visera protectora solar/intemperie
+  const viseraGeo = new THREE.BoxGeometry(0.070, 0.004, 0.16);
+  const viseraMesh = new THREE.Mesh(viseraGeo, matMarco);
+  viseraMesh.position.set(0, 0.029, 0.055);
+  grupoCarcasa.add(viseraMesh);
+
+  // Frontal óptico oscuro
+  const frontalGeo = new THREE.BoxGeometry(0.054, 0.044, 0.004);
+  const frontalMesh = new THREE.Mesh(frontalGeo, matOscuro);
+  frontalMesh.position.set(0, 0, 0.126);
+  grupoCarcasa.add(frontalMesh);
+
+  // Lente LPR
+  const lenteGeo = new THREE.CylinderGeometry(0.015, 0.015, 0.006, 20);
+  lenteGeo.rotateX(Math.PI / 2);
+  const lenteMesh = new THREE.Mesh(lenteGeo, matOscuro);
+  lenteMesh.position.set(0, 0.003, 0.128);
+  grupoCarcasa.add(lenteMesh);
+
+  // Anillo IR LPR
+  const irGeo = new THREE.RingGeometry(0.009, 0.014, 20);
+  const irMesh = new THREE.Mesh(irGeo, matLed);
+  irMesh.position.set(0, 0.003, 0.130);
+  grupoCarcasa.add(irMesh);
+
+  grupoCamara.add(grupoCarcasa);
+  return grupoCamara;
 }
 
 /**
@@ -644,6 +737,39 @@ export function buildTotem(params = {}, loader = null, material = null) {
     modTrasero.rotation.y = Math.PI; // Mira hacia -Z (hacia atrás)
     grupoTotem.add(modTrasero);
   });
+
+  // 8. Cámaras LPR Laterales (Eje X: Izquierda, Derecha o Ambas)
+  const lprLateral = String(
+    params.camaraLPRLateral || params.camara_lpr_lateral || params.lprLateral || ''
+  ).toLowerCase().trim();
+
+  if (lprLateral === 'izquierda' || lprLateral === 'ambas') {
+    const camIzq = construirCamaraLPRLateral({
+      lado: 'izquierda',
+      altoM,
+      anchoM,
+      fondoM,
+      matPrincipal,
+      matMarco,
+      matOscuro,
+      matLed
+    });
+    grupoTotem.add(camIzq);
+  }
+
+  if (lprLateral === 'derecha' || lprLateral === 'ambas') {
+    const camDer = construirCamaraLPRLateral({
+      lado: 'derecha',
+      altoM,
+      anchoM,
+      fondoM,
+      matPrincipal,
+      matMarco,
+      matOscuro,
+      matLed
+    });
+    grupoTotem.add(camDer);
+  }
 
   grupoTotem.userData = {
     altoTotemM: altoM,

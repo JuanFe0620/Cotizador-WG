@@ -1,6 +1,21 @@
 import jsPDF from 'jspdf';
 import { construirPaginaPlanoCAD } from '/src/components/Visor3D/visor/builders/generadorPlanoCAD.js';
 
+// Limpieza de caracteres incompatibles con fuentes estándar de jsPDF
+export const limpiarTextoTipografico = (texto) => {
+  if (texto === null || texto === undefined) return '';
+  if (typeof texto !== 'string') texto = String(texto);
+
+  return texto
+    .normalize('NFC')
+    .replace(/[Ø⌀]\s*/g, 'Diam. ')
+    .replace(/[Ø⌀]/g, 'Diam.')
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/[–—]/g, '-')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '');
+};
+
 export const exportarPdfTecnico = async ({
   items,
   totalCotizacion,
@@ -58,6 +73,81 @@ export const exportarPdfTecnico = async ({
     }).catch(e => console.error("Error guardando historial:", e));
 
     const pdf = new jsPDF('p', 'mm', 'a4');
+    const doc = pdf;
+
+    // Interceptar text para sanitizar todos los caracteres tipográficos (evita Error 109 de Acrobat)
+    const originalText = doc.text.bind(doc);
+    doc.text = function(...args) {
+      if (args.length > 0) {
+        if (Array.isArray(args[0])) {
+          args[0] = args[0].map(t => limpiarTextoTipografico(t));
+        } else {
+          args[0] = limpiarTextoTipografico(args[0]);
+        }
+      }
+      try {
+        return originalText(...args);
+      } catch (e) {
+        console.warn("⚠️ [PDF] Error capturado en doc.text:", e);
+        return doc;
+      }
+    };
+
+    // 1. Validación estricta de imágenes Base64 antes de insertar
+    const validarImagenBase64 = (imageData) => {
+      if (!imageData || typeof imageData !== 'string') return false;
+      const trimmed = imageData.trim();
+      if (trimmed.length < 100) return false;
+      if (!trimmed.startsWith('data:image/png;base64,') && !trimmed.startsWith('data:image/jpeg;base64,')) {
+        return false;
+      }
+      return true;
+    };
+
+    // Interceptar addImage para garantizar que ninguna imagen nula, vacía, <100 caracteres o corrupta dañe los streams XObject
+    const originalAddImage = doc.addImage.bind(doc);
+    doc.addImage = function(imageData, format, x, y, width, height, alias, compression, rotation) {
+      if (!validarImagenBase64(imageData)) {
+        console.warn("⚠️ [PDF] addImage omitido: imagen nula, vacía, <100 caracteres o formato no Base64 válido (previniendo Error 109 de Acrobat).");
+        // Reemplazar por un recuadro gris o espacio en blanco para evitar corromper los streams XObject del PDF
+        if (x !== undefined && y !== undefined && width !== undefined && height !== undefined) {
+          try {
+            doc.setFillColor(245, 247, 250);
+            doc.setDrawColor(226, 232, 240);
+            doc.rect(x, y, width, height, 'FD');
+          } catch (e) {}
+        }
+        return doc;
+      }
+
+      try {
+        return originalAddImage(imageData, format, x, y, width, height, alias, compression, rotation);
+      } catch (err) {
+        console.warn("⚠️ [PDF] Error capturado en addImage para evitar corrupción de streams XObject:", err);
+        if (x !== undefined && y !== undefined && width !== undefined && height !== undefined) {
+          try {
+            doc.setFillColor(245, 247, 250);
+            doc.setDrawColor(226, 232, 240);
+            doc.rect(x, y, width, height, 'FD');
+          } catch (e) {}
+        }
+        return doc;
+      }
+    };
+
+    // Redirección segura de doc.save a descarga limpia mediante Blob Binario
+    doc.save = function(nombreArchivo) {
+      const blob = doc.output('blob');
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = nombreArchivo || `Cotizacion_${consecutivo || 'WG'}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    };
+
     const fechaActual = new Date();
     const fechaStr = fechaActual.toLocaleDateString('es-CO');
     const fechaVenc = new Date();
@@ -71,12 +161,39 @@ export const exportarPdfTecnico = async ({
 
     // 1. CABECERA E INSTITUCIONAL
     try {
-      pdf.addImage('/logo.png', 'PNG', 14, 8, 28, 22);
+      const cargarLogoBase64 = async () => {
+        try {
+          const res = await fetch('/logo.png');
+          if (!res.ok) return null;
+          const blob = await res.blob();
+          return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result);
+            reader.onerror = () => resolve(null);
+            reader.readAsDataURL(blob);
+          });
+        } catch {
+          return null;
+        }
+      };
+
+      const logoDataUrl = await cargarLogoBase64();
+
+      if (logoDataUrl && validarImagenBase64(logoDataUrl)) {
+        // Ancho 38mm y Alto 14mm proporcionales para el encabezado
+        originalAddImage(logoDataUrl, 'PNG', 10, 8, 30, 14);
+      } else {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(14);
+        doc.setTextColor(0, 51, 102);
+        doc.text("WG INGENIERÍA", 14, 18);
+      }
     } catch (err) {
-      pdf.setFont('helvetica', 'bold');
-      pdf.setFontSize(12);
-      pdf.setTextColor(0, 51, 102);
-      pdf.text("WG INGENIERÍA", 14, 18);
+      console.warn("⚠️ [PDF] Error insertando logo corporativo:", err);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(14);
+      doc.setTextColor(0, 51, 102);
+      doc.text("WG INGENIERÍA", 14, 18);
     }
 
     pdf.setFontSize(8);
@@ -246,13 +363,14 @@ export const exportarPdfTecnico = async ({
 
         const largoTramo = tramos.length > 0 ? (parseFloat(tramos[0].alto || tramos[0].longitud || 300)) : 300;
         const largoCm = largoTramo < 10 ? largoTramo * 100 : largoTramo;
-        const detTramo = tramos.length > 0 ? obtenerDetalleTramo(tramos[0], item) : `Tubo Redondo Calibre ${item.calibre || 14} Ø ${item.diametro || 4}"`;
+        const rawTramo = tramos.length > 0 ? obtenerDetalleTramo(tramos[0], item) : `Tubo Redondo Calibre ${item.calibre || 14} Diam. ${item.diametro || 4}"`;
+        const detTramo = limpiarTextoTipografico(rawTramo);
 
         pdf.text(`${detTramo} x ${largoCm} cm.`, 68, y);
         y += 4;
 
         if (baseObj) {
-          const detBase = obtenerDetalleBase(baseObj);
+          const detBase = limpiarTextoTipografico(obtenerDetalleBase(baseObj));
           if (detBase) {
             pdf.setFont('helvetica', 'bold');
             pdf.setTextColor(60, 60, 60);
@@ -357,10 +475,29 @@ export const exportarPdfTecnico = async ({
     pdf.text("FECHA DE RECIBIDO:", 14, y + 8);
 
     for (let index = 0; index < items.length; index++) {
-      await construirPaginaPlanoCAD(pdf, visorRef, items[index], index + 1);
+      const item = items[index];
+      if (visorRef?.current?.cargarModeloItem) {
+        try {
+          await visorRef.current.cargarModeloItem(item);
+          // Pausa controlada para asegurar que el pipeline de WebGL y el buffer de dibujo estén 100% listos
+          await new Promise(r => setTimeout(r, 250));
+        } catch (e) {
+          console.warn("⚠️ [PDF] Error precargando modelo 3D para ítem:", e);
+        }
+      }
+      await construirPaginaPlanoCAD(pdf, visorRef, item, index + 1);
     }
 
-    pdf.save(`Servicio_Fabricacion_${consecutivo}.pdf`);
+    // 2. Descarga segura mediante Blob Binario
+    const blob = doc.output('blob');
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `Cotizacion_${consecutivo || 'WG'}.pdf`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   } catch (error) {
     console.error("Error al generar el PDF:", error);
   } finally {

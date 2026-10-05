@@ -8,7 +8,6 @@ import { construirBases } from './visor/builders/basesBuilder';
 import { construirPlatinas } from './visor/builders/platinasBuilder';
 import { construirCoronas } from './visor/builders/coronasBuilder';
 import { construirCuboPoste } from './visor/builders/cuboBuilder';
-import { construirCotas } from './visor/builders/cotasBuilder';
 import { construirGabinete } from './visor/builders/gabineteBuilder';
 import { buildBrazo } from './visor/builders/brazosBuilder';
 import { construirPuerta } from './visor/builders/puertasBuilder';
@@ -28,6 +27,8 @@ const VisorM3 = forwardRef(({
   const rendererRef = useRef(null);
   const gridRef = useRef(null);
   const controlsRef = useRef(null);
+  const haInicializadoCamaraRef = useRef(false);
+  const categoriaAnteriorRef = useRef(categoriaSel);
 
   const renderizarEscena = useCallback((paramsTarget, cantidadesAccTarget = {}) => {
     const scene = sceneRef.current;
@@ -55,6 +56,11 @@ const VisorM3 = forwardRef(({
 
     // 2. Normalización de Categoría
     const catOriginal = String(paramsTarget?.categoria || paramsTarget?.categoriaSel || categoriaSel || '').toLowerCase();
+    const cambioCategoria = categoriaAnteriorRef.current !== catOriginal;
+    if (cambioCategoria) {
+      categoriaAnteriorRef.current = catOriginal;
+    }
+
     const esGabinete = catOriginal.includes('gabinete') || catOriginal.includes('gabinetes');
     const esBrazo = catOriginal.includes('brazo') || catOriginal.includes('brazos');
     const esTotem = catOriginal.includes('totem') || catOriginal.includes('totems') || catOriginal.includes('tótem');
@@ -108,7 +114,7 @@ const VisorM3 = forwardRef(({
         scene
       });
 
-      if (controlsRef.current) {
+      if (controlsRef.current && (!haInicializadoCamaraRef.current || cambioCategoria)) {
         const altoRef = altoGabinete || paramsNormalizados.alto || 100;
         const altoEnMetros = (altoRef < 10 ? altoRef * 100 : altoRef) / 100;
         controlsRef.current.target.set(0.15, altoEnMetros / 2, 0);
@@ -117,7 +123,7 @@ const VisorM3 = forwardRef(({
       const totemMesh = buildTotem(paramsCompletos, loader, matGenerico);
       scene.add(totemMesh);
 
-      if (controlsRef.current) {
+      if (controlsRef.current && (!haInicializadoCamaraRef.current || cambioCategoria)) {
         const altoEnMetros = totemMesh?.userData?.altoTotemM || ((paramsNormalizados.alto || 150) / 100);
         controlsRef.current.target.set(0, altoEnMetros / 2, 0);
       }
@@ -182,7 +188,7 @@ const VisorM3 = forwardRef(({
       const centro = new THREE.Vector3();
       bbox.getCenter(centro);
 
-      if (controlsRef.current) {
+      if (controlsRef.current && (!haInicializadoCamaraRef.current || cambioCategoria)) {
         controlsRef.current.target.copy(centro);
       }
     } else {
@@ -312,18 +318,20 @@ const VisorM3 = forwardRef(({
         });
       }
 
-      construirCotas({
-        limitesTramos,
-        scene,
-        params: paramsNormalizados
-      });
 
-      if (controlsRef.current && limitesTramos && limitesTramos.length > 0) {
-        const ultimoTramo = limitesTramos[limitesTramos.length - 1];
-        const altoTotal = ultimoTramo?.yMax || 1.5;
-        controlsRef.current.target.set(0, altoTotal / 2, 0);
+
+      if (controlsRef.current && (!haInicializadoCamaraRef.current || cambioCategoria)) {
+        if (limitesTramos && limitesTramos.length > 0) {
+          const ultimoTramo = limitesTramos[limitesTramos.length - 1];
+          const altoTotal = ultimoTramo?.yMax || 1.5;
+          controlsRef.current.target.set(0, altoTotal / 2, 0);
+        } else {
+          controlsRef.current.target.set(0, 0.1, 0);
+        }
       }
     }
+
+    haInicializadoCamaraRef.current = true;
   }, [tubos, accesorios, laminas, categoriaSel]);
 
   useImperativeHandle(ref, () => ({

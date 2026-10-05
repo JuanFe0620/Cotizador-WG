@@ -114,6 +114,7 @@ export default function ConfiguradorTotem({
           prev.tapaRegistro !== undefined
             ? prev.tapaRegistro
             : mecanizadosTraserosInit.includes('tapa_registro'),
+        camaraLPRLateral: prev.camaraLPRLateral || 'ninguna',
         incluirBase: incluirBase,
         incluirPlatina: incluirBase,
         anchoPlatina: anchoPlatinaInit,
@@ -485,13 +486,56 @@ export default function ConfiguradorTotem({
             </div>
           )}
         </div>
+
+        {/* CÁMARAS LPR LATERALES (EJE X) */}
+        <div className="bg-white border border-slate-200 rounded-lg p-2.5 space-y-2">
+          <div className="flex items-center justify-between">
+            <div>
+              <span className="text-[11px] font-bold text-slate-800 block">
+                Cámara LPR Lateral (Eje X)
+              </span>
+              <span className="text-[10px] text-slate-500">
+                Soporte saliente lateral para lectura de matrículas
+              </span>
+            </div>
+          </div>
+          <div className="grid grid-cols-4 gap-1 bg-slate-100 p-0.5 rounded-lg border border-slate-200">
+            {[
+              { id: 'ninguna', label: 'Ninguna' },
+              { id: 'izquierda', label: 'Izquierda' },
+              { id: 'derecha', label: 'Derecha' },
+              { id: 'ambas', label: 'Ambas' }
+            ].map((op) => {
+              const esActivo = (params.camaraLPRLateral || 'ninguna') === op.id;
+              return (
+                <button
+                  key={op.id}
+                  type="button"
+                  onClick={() =>
+                    setParams((prev) => ({
+                      ...prev,
+                      camaraLPRLateral: op.id
+                    }))
+                  }
+                  className={`px-2 py-1 rounded-md text-[11px] font-bold transition ${
+                    esActivo
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  {op.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
       </div>
 
       {/* 4. OPCIONES ESTRUCTURALES Y BASE DE ANCLAJE */}
       <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-3">
         <span className="font-bold text-slate-700 uppercase text-[10px] tracking-wider flex items-center gap-1.5">
           <Shield size={13} className="text-blue-600" />
-          Estructura y Base de Anclaje Lateral
+          Estructura y Base de Anclaje Frontal / Trasera (Eje Z)
         </span>
 
         {/* Visera superior inclinada hacia +Z */}
@@ -543,10 +587,10 @@ export default function ConfiguradorTotem({
             />
             <div>
               <span className="text-[11px] font-semibold text-slate-700 block">
-                Base de Anclaje con Cartelas Laterales (Eje X)
+                Base de Anclaje con Cartelas Frontales y Traseras (Eje Z)
               </span>
               <span className="text-[10px] text-slate-500">
-                Platina paramétrica + pies de amigo perforados en costados izquierdo/derecho
+                Platina paramétrica + pies de amigo reforzando hacia adelante y atrás
               </span>
             </div>
           </label>
@@ -598,7 +642,7 @@ export default function ConfiguradorTotem({
               </div>
               <div>
                 <label className="text-[10px] text-slate-600 font-medium block mb-1">
-                  Cartelas Laterales
+                  Cartelas (Adelante/Atrás)
                 </label>
                 <select
                   value={params.paresCartelas || 2}
@@ -610,8 +654,8 @@ export default function ConfiguradorTotem({
                   }
                   className="w-full bg-slate-50 border border-slate-300 rounded-lg p-1.5 text-center font-medium text-slate-800"
                 >
-                  <option value={1}>1 Par (2 uds)</option>
-                  <option value={2}>2 Pares (4 uds)</option>
+                  <option value={1}>1 Par (1 frente, 1 atrás)</option>
+                  <option value={2}>2 Pares (2 frente, 2 atrás)</option>
                 </select>
               </div>
             </div>
@@ -662,32 +706,6 @@ export default function ConfiguradorTotem({
             );
           })}
         </div>
-
-        {pinturas && pinturas.length > 0 && (
-          <select
-            value={params.tipoPinturaId || ''}
-            onChange={(e) => {
-              const idPint = e.target.value;
-              const pintObj = pinturas.find((p) => String(p.id) === String(idPint));
-              setParams((prev) => ({
-                ...prev,
-                tipoPinturaId: idPint,
-                ...(pintObj?.color_hex && {
-                  colorPintura: pintObj.color_hex,
-                  pintura: pintObj.color_hex
-                })
-              }));
-            }}
-            className="w-full bg-white border border-slate-300 rounded-lg p-2 text-slate-700 text-[11px]"
-          >
-            <option value="">Acabado Electrostático Estándar (Poliéster Exterior)</option>
-            {pinturas.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.nombre || p.tipo} {p.color ? `- ${p.color}` : ''}
-              </option>
-            ))}
-          </select>
-        )}
       </div>
     </div>
   );

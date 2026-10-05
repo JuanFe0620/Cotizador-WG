@@ -99,9 +99,10 @@ export default function HistorialCotizaciones({
                   <td className="p-3 text-right">
                     <button 
                       onClick={() => onCargarCotizacionExistente(c.id)}
-                      className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-xs transition flex items-center gap-1 ml-auto font-medium shadow-sm"
+                      className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-xs transition flex items-center gap-1.5 ml-auto font-semibold shadow-sm"
+                      title="Cargar / Editar Cotización"
                     >
-                      <FileText size={13} /> Abrir
+                      <FileText size={14} /> Cargar / Editar
                     </button>
                   </td>
                 </tr>

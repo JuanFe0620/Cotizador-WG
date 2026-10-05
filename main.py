@@ -130,28 +130,9 @@ from sqlalchemy import text
 
 @app.on_event("startup")
 def startup_db_client():
-    # Forzamos la eliminación en cascada de todo el esquema de la BD
-    with engine.connect() as connection:
-        connection.execute(text("DROP SCHEMA public CASCADE;"))
-        connection.execute(text("CREATE SCHEMA public;"))
-        connection.commit()
-        
     models.Base.metadata.create_all(bind=engine)
     
     db = SessionLocal()
-    try:
-        if sembrar_datos:
-            print("🌱 Cargando precios y materiales desde seed.py...")
-            sembrar_datos(db)
-        else:
-            print("⚠️ No se pudo importar la función de carga desde seed.py")
-
-        sembrar_brazos_y_bujes_defecto(db)
-        sincronizar_clientes_csv(db)
-    except Exception as e:
-        print(f"❌ Error durante la inicialización en startup: {e}")
-    finally:
-        db.close()
     try:
         if sembrar_datos:
             print("🌱 Cargando precios y materiales desde seed.py...")
@@ -198,23 +179,31 @@ class ItemCotizacionSchema(BaseModel):
     descripcion: str
     lamina: Optional[str] = None
     pintura: Optional[str] = None
-    costoPintura: float = 0.0
-    costoTubos: float = 0.0
-    areaPintable: float = 0.0
-    alto: float = 0.0
-    ancho: float = 0.0
-    fondo: float = 0.0
-    costoBase: float = 0.0
-    total: float = 0.0
+    costoPintura: Optional[float] = 0.0
+    costoTubos: Optional[float] = 0.0
+    areaPintable: Optional[float] = 0.0
+    alto: Optional[float] = 0.0
+    ancho: Optional[float] = 0.0
+    fondo: Optional[float] = 0.0
+    costoBase: Optional[float] = 0.0
+    total: Optional[float] = 0.0
     accesoriosLista: Optional[List[Dict[str, Any]]] = []
+    configuracion: Optional[Dict[str, Any]] = None
+    params: Optional[Dict[str, Any]] = None
 
 
 class GuardarCotizacionReq(BaseModel):
     consecutivo: Optional[str] = None
-    clienteNombre: str = "Cliente General (Sin NIT)"
+    cliente_id: Optional[int] = None
+    clienteId: Optional[int] = None
+    clienteNombre: Optional[str] = "Consumidor Final / Mostrador"
+    cliente_nombre: Optional[str] = None
     clienteNit: Optional[str] = None
-    nivelPrecio: int = 1
-    total: float = 0.0
+    cliente_nit: Optional[str] = None
+    observaciones: Optional[str] = None
+    notas: Optional[str] = None
+    nivelPrecio: Optional[int] = 1
+    total: Optional[float] = 0.0
     items: List[ItemCotizacionSchema]
 
 
@@ -259,6 +248,14 @@ class BujeSchema(BaseModel):
     precio: float
     subtipo: Optional[str] = "ambos"
     categorias: Optional[str] = "brazos"
+
+
+class MecanizadoTotemSchema(BaseModel):
+    clave: str
+    nombre: str
+    precio: float
+    es_lpr: Optional[bool] = False
+    area_m2: Optional[float] = 0.08
 
 
 class BrazoSchema(BaseModel):
@@ -341,6 +338,19 @@ def serializar_brazo(br: Any) -> Dict[str, Any]:
     }
 
 
+def serializar_mecanizado_totem(m: Any) -> Dict[str, Any]:
+    return {
+        "id": m.id,
+        "clave": m.clave,
+        "nombre": m.nombre,
+        "precio": m.precio,
+        "es_lpr": getattr(m, "es_lpr", False),
+        "esLpr": getattr(m, "es_lpr", False),
+        "area_m2": getattr(m, "area_m2", 0.08),
+        "areaM2": getattr(m, "area_m2", 0.08)
+    }
+
+
 def obtener_siguiente_consecutivo_db(db: Session) -> str:
     ultima = db.query(models.Cotizacion).order_by(models.Cotizacion.id.desc()).first()
     if not ultima or not ultima.consecutivo:
@@ -362,6 +372,96 @@ def obtener_bujes(db: Session = Depends(get_db)):
         bujes = db.query(models.Buje).all()
         return [serializar_buje(b) for b in bujes]
     return []
+
+
+@app.post("/api/bujes")
+@app.post("/bujes")
+def crear_buje(item: BujeSchema, db: Session = Depends(get_db)):
+    if hasattr(models, 'Buje'):
+        db_item = models.Buje(**get_dict(item))
+        db.add(db_item)
+        db.commit()
+        db.refresh(db_item)
+        return serializar_buje(db_item)
+    return {"error": "Modelo Buje no definido"}
+
+
+@app.put("/api/bujes/{item_id}")
+@app.put("/bujes/{item_id}")
+def actualizar_buje(item_id: int, item: BujeSchema, db: Session = Depends(get_db)):
+    if hasattr(models, 'Buje'):
+        db_item = db.query(models.Buje).filter(models.Buje.id == item_id).first()
+        if not db_item:
+            raise HTTPException(status_code=404, detail="Buje no encontrado")
+        for key, value in get_dict(item).items():
+            setattr(db_item, key, value)
+        db.commit()
+        db.refresh(db_item)
+        return serializar_buje(db_item)
+    return {"error": "Modelo Buje no definido"}
+
+
+@app.delete("/api/bujes/{item_id}")
+@app.delete("/bujes/{item_id}")
+def eliminar_buje(item_id: int, db: Session = Depends(get_db)):
+    if hasattr(models, 'Buje'):
+        db_item = db.query(models.Buje).filter(models.Buje.id == item_id).first()
+        if not db_item:
+            raise HTTPException(status_code=404, detail="Buje no encontrado")
+        db.delete(db_item)
+        db.commit()
+        return {"ok": True}
+    return {"error": "Modelo Buje no definido"}
+
+
+# --- ENDPOINTS MECANIZADOS TÓTEM ---
+@app.get("/api/mecanizados-totem")
+@app.get("/mecanizados-totem")
+def obtener_mecanizados_totem(db: Session = Depends(get_db)):
+    if hasattr(models, 'MecanizadoTotem'):
+        items = db.query(models.MecanizadoTotem).all()
+        return [serializar_mecanizado_totem(m) for m in items]
+    return []
+
+
+@app.post("/api/mecanizados-totem")
+@app.post("/mecanizados-totem")
+def crear_mecanizado_totem(item: MecanizadoTotemSchema, db: Session = Depends(get_db)):
+    if hasattr(models, 'MecanizadoTotem'):
+        db_item = models.MecanizadoTotem(**get_dict(item))
+        db.add(db_item)
+        db.commit()
+        db.refresh(db_item)
+        return serializar_mecanizado_totem(db_item)
+    return {"error": "Modelo MecanizadoTotem no definido"}
+
+
+@app.put("/api/mecanizados-totem/{item_id}")
+@app.put("/mecanizados-totem/{item_id}")
+def actualizar_mecanizado_totem(item_id: int, item: MecanizadoTotemSchema, db: Session = Depends(get_db)):
+    if hasattr(models, 'MecanizadoTotem'):
+        db_item = db.query(models.MecanizadoTotem).filter(models.MecanizadoTotem.id == item_id).first()
+        if not db_item:
+            raise HTTPException(status_code=404, detail="Mecanizado de tótem no encontrado")
+        for key, value in get_dict(item).items():
+            setattr(db_item, key, value)
+        db.commit()
+        db.refresh(db_item)
+        return serializar_mecanizado_totem(db_item)
+    return {"error": "Modelo MecanizadoTotem no definido"}
+
+
+@app.delete("/api/mecanizados-totem/{item_id}")
+@app.delete("/mecanizados-totem/{item_id}")
+def eliminar_mecanizado_totem(item_id: int, db: Session = Depends(get_db)):
+    if hasattr(models, 'MecanizadoTotem'):
+        db_item = db.query(models.MecanizadoTotem).filter(models.MecanizadoTotem.id == item_id).first()
+        if not db_item:
+            raise HTTPException(status_code=404, detail="Mecanizado de tótem no encontrado")
+        db.delete(db_item)
+        db.commit()
+        return {"ok": True}
+    return {"error": "Modelo MecanizadoTotem no definido"}
 
 
 @app.get("/api/brazos")
@@ -395,8 +495,10 @@ def listar_cotizaciones(q: Optional[str] = None, db: Session = Depends(get_db)):
         resultado.append({
             "id": c.id,
             "consecutivo": c.consecutivo,
-            "cliente_nombre": c.cliente_nombre,
+            "cliente_id": getattr(c, "cliente_id", None),
+            "cliente_nombre": c.cliente_nombre or "Consumidor Final / Mostrador",
             "cliente_nit": c.cliente_nit,
+            "observaciones": getattr(c, "observaciones", "") or "",
             "estado": getattr(c, "estado", "ACTIVA"),
             "fecha": c.fecha_creacion.strftime("%Y-%m-%d %H:%M") if getattr(c, "fecha_creacion", None) else "",
             "total": c.total,
@@ -421,7 +523,14 @@ def obtener_cotizacion_detalle(cotizacion_id: int, db: Session = Depends(get_db)
                 except Exception:
                     acc_lista = []
 
-            items_formateados.append({
+            cfg_obj = {}
+            if getattr(item, "configuracion_json", None):
+                try:
+                    cfg_obj = json.loads(item.configuracion_json)
+                except Exception:
+                    cfg_obj = {}
+
+            item_dict = {
                 "id": item.id,
                 "categoria": item.categoria,
                 "descripcion": item.descripcion,
@@ -435,14 +544,27 @@ def obtener_cotizacion_detalle(cotizacion_id: int, db: Session = Depends(get_db)
                 "fondo": item.fondo,
                 "costoBase": item.costo_base,
                 "total": item.total,
-                "accesoriosLista": acc_lista
-            })
+                "accesoriosLista": acc_lista,
+                "configuracion": cfg_obj,
+                "params": cfg_obj,
+                "detalles": cfg_obj
+            }
+
+            # Si cfg_obj tiene atributos específicos, propagarlos para máxima compatibilidad con el visor
+            if isinstance(cfg_obj, dict):
+                for k, v in cfg_obj.items():
+                    if k not in item_dict:
+                        item_dict[k] = v
+
+            items_formateados.append(item_dict)
 
     return {
         "id": cot.id,
         "consecutivo": cot.consecutivo,
-        "cliente_nombre": cot.cliente_nombre,
+        "cliente_id": getattr(cot, "cliente_id", None),
+        "cliente_nombre": cot.cliente_nombre or "Consumidor Final / Mostrador",
         "cliente_nit": cot.cliente_nit,
+        "observaciones": getattr(cot, "observaciones", "") or "",
         "nivel_precio": cot.nivel_precio,
         "estado": getattr(cot, "estado", "ACTIVA"),
         "total": cot.total,
@@ -462,13 +584,20 @@ def guardar_cotizacion(req: GuardarCotizacionReq, db: Session = Depends(get_db))
             else:
                 consecutivo_final = req.consecutivo or "COT-2001"
 
+        cliente_id_val = req.cliente_id if req.cliente_id is not None else req.clienteId
+        cliente_nom_val = req.clienteNombre or req.cliente_nombre or "Consumidor Final / Mostrador"
+        cliente_nit_val = req.clienteNit or req.cliente_nit
+        observaciones_val = req.observaciones or req.notas or ""
+
         nueva_cot = models.Cotizacion(
             consecutivo=consecutivo_final,
-            cliente_nombre=req.clienteNombre,
-            cliente_nit=req.clienteNit,
-            nivel_precio=req.nivelPrecio,
-            total=req.total,
-            estado="ACTIVA" if hasattr(models.Cotizacion, "estado") else None
+            cliente_id=cliente_id_val,
+            cliente_nombre=cliente_nom_val,
+            cliente_nit=cliente_nit_val,
+            observaciones=observaciones_val,
+            nivel_precio=req.nivelPrecio or 1,
+            total=req.total or 0.0,
+            estado="ACTIVA"
         )
         db.add(nueva_cot)
         db.commit()
@@ -476,21 +605,25 @@ def guardar_cotizacion(req: GuardarCotizacionReq, db: Session = Depends(get_db))
 
         for item_data in req.items:
             acc_json_str = json.dumps(item_data.accesoriosLista or [])
+            cfg_dict = item_data.configuracion or item_data.params or {}
+            cfg_json_str = json.dumps(cfg_dict)
+
             item_db = models.CotizacionItem(
                 cotizacion_id=nueva_cot.id,
                 categoria=item_data.categoria,
                 descripcion=item_data.descripcion,
                 lamina=item_data.lamina,
                 pintura=item_data.pintura,
-                costo_pintura=item_data.costoPintura,
-                costo_tubos=item_data.costoTubos,
-                area_pintable=item_data.areaPintable,
-                alto=item_data.alto,
-                ancho=item_data.ancho,
-                fondo=item_data.fondo,
-                costo_base=item_data.costoBase,
-                total=item_data.total,
-                accesorios_json=acc_json_str
+                costo_pintura=item_data.costoPintura or 0.0,
+                costo_tubos=item_data.costoTubos or 0.0,
+                area_pintable=item_data.areaPintable or 0.0,
+                alto=item_data.alto or 0.0,
+                ancho=item_data.ancho or 0.0,
+                fondo=item_data.fondo or 0.0,
+                costo_base=item_data.costoBase or 0.0,
+                total=item_data.total or 0.0,
+                accesorios_json=acc_json_str,
+                configuracion_json=cfg_json_str
             )
             db.add(item_db)
 
@@ -662,6 +795,7 @@ def obtener_materiales(db: Session = Depends(get_db)):
         accesorios = [serializar_accesorio(a) for a in db.query(models.Accesorio).all()] if hasattr(models, 'Accesorio') else []
         bujes = [serializar_buje(b) for b in db.query(models.Buje).all()] if hasattr(models, 'Buje') else []
         brazos = [serializar_brazo(br) for br in db.query(models.Brazo).all()] if hasattr(models, 'Brazo') else []
+        mecanizados_totem = [serializar_mecanizado_totem(m) for m in db.query(models.MecanizadoTotem).all()] if hasattr(models, 'MecanizadoTotem') else []
         laminas = db.query(models.Lamina).all() if hasattr(models, 'Lamina') else []
         pinturas = db.query(models.Pintura).all() if hasattr(models, 'Pintura') else []
         
@@ -671,7 +805,8 @@ def obtener_materiales(db: Session = Depends(get_db)):
             "pinturas": pinturas,
             "accesorios": accesorios,
             "bujes": bujes,
-            "brazos": brazos
+            "brazos": brazos,
+            "mecanizados_totem": mecanizados_totem
         }
     except Exception as e:
         traceback.print_exc()

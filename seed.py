@@ -118,7 +118,9 @@ def sembrar_datos(db=None):
                 {"nombre": "Corona de Empalme", "precio": 0, "categorias": "postes", "requiere_lamina": True, "permite_n_pies": False, "grupo_exclusion": "corona"},
                 {"nombre": "Refuerzos Horizontales (Piso)", "precio": 18000, "categorias": "gabinetes,totems", "requiere_lamina": True, "grupo_exclusion": None},
                 {"nombre": "Ruedas Industriales (Juego x4)", "precio": 15000, "categorias": "gabinetes", "requiere_lamina": False, "permite_n_pies": False, "grupo_exclusion": None},
-                {"nombre": "Parales Traseros de Rack", "precio": 25000, "categorias": "gabinetes", "requiere_lamina": False, "permite_n_pies": False, "grupo_exclusion": None}
+                {"nombre": "Parales Traseros de Rack", "precio": 25000, "categorias": "gabinetes", "requiere_lamina": False, "permite_n_pies": False, "grupo_exclusion": None},
+                {"nombre": "Caperuza / Cubre-anclaje Embellecedora", "precio": 25000, "categorias": "postes,brazos", "requiere_lamina": False, "permite_n_pies": False, "grupo_exclusion": None},
+                {"nombre": "Soporte Caja Videoportero en Punta", "precio": 45000, "categorias": "brazos,postes", "requiere_lamina": False, "permite_n_pies": False, "grupo_exclusion": None}
             ]
 
             for acc in accesorios_deseados:
@@ -130,7 +132,7 @@ def sembrar_datos(db=None):
                     db.add(models.Accesorio(**acc))
 
         # -------------------------------------------------------------
-        # 5. SIEMBRA DE BUJES (5 Tipos Totales habilitados para ambos lados)
+        # 5. SIEMBRA DE BUJES (Incluye Platinas como bujes base)
         # -------------------------------------------------------------
         if hasattr(models, 'Buje'):
             renombres_bujes = {
@@ -147,7 +149,10 @@ def sembrar_datos(db=None):
                 {"nombre": "Buje Roseta", "precio": 15000, "subtipo": "ambos", "categorias": "brazos"},
                 {"nombre": "Buje Universal", "precio": 28000, "subtipo": "ambos", "categorias": "brazos"},
                 {"nombre": "Platina Rectangular Perforada", "precio": 18000, "subtipo": "ambos", "categorias": "brazos"},
-                {"nombre": "Buje PTZ", "precio": 22000, "subtipo": "ambos", "categorias": "brazos"}
+                {"nombre": "Platina Redonda", "precio": 22000, "subtipo": "base", "categorias": "brazos"},
+                {"nombre": "Platina Cuadrada", "precio": 22000, "subtipo": "base", "categorias": "brazos"},
+                {"nombre": "Buje PTZ", "precio": 22000, "subtipo": "ambos", "categorias": "brazos"},
+                {"nombre": "Soporte Videoportero en Punta", "precio": 45000, "subtipo": "punta", "categorias": "brazos"}
             ]
 
             for buje in bujes_deseados:
@@ -187,8 +192,25 @@ def sembrar_datos(db=None):
                 else:
                     db.add(models.Brazo(**brazo))
 
+        # -------------------------------------------------------------
+        # 7. SIEMBRA DE MECANIZADOS DE TÓTEM
+        # -------------------------------------------------------------
+        if hasattr(models, 'MecanizadoTotem'):
+            mecanizados_deseados = [
+                {"clave": "videoportero", "nombre": "Calado Videoportero / Control de Acceso", "precio": 35000.0, "es_lpr": False, "area_m2": 0.08},
+                {"clave": "biometrico", "nombre": "Mecanizado Lector Biométrico / Teclado", "precio": 35000.0, "es_lpr": False, "area_m2": 0.09},
+                {"clave": "lpr", "nombre": "Ventana LPR con Visera y Acrílico", "precio": 50000.0, "es_lpr": True, "area_m2": 0.14},
+                {"clave": "tapa_registro", "nombre": "Tapa de Inspección / Registro con Chapa", "precio": 35000.0, "es_lpr": False, "area_m2": 0.12},
+                {"clave": "camara_lpr_lateral", "nombre": "Soporte y Mecanizado Cámara LPR Lateral", "precio": 65000.0, "es_lpr": True, "area_m2": 0.05}
+            ]
+
+            for mec in mecanizados_deseados:
+                existe = db.query(models.MecanizadoTotem).filter(models.MecanizadoTotem.clave == mec["clave"]).first()
+                if not existe:
+                    db.add(models.MecanizadoTotem(**mec))
+
         db.commit()
-        print("✅ Tubos, Láminas, Pinturas, Accesorios, Bujes y Brazos actualizados con éxito.")
+        print("✅ Tubos, Láminas, Pinturas, Accesorios, Bujes, Mecanizados y Brazos actualizados con éxito.")
 
     except Exception as e:
         db.rollback()

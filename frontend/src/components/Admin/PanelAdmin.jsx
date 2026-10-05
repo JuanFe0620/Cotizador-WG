@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
-import { Shield, Layers, Box, Wrench, Palette } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Shield, Layers, Box, Wrench, Palette, CircleDot, Cpu } from 'lucide-react';
 
 import TabTubos from './TabTubos';
 import TabAccesorios from './TabAccesorios';
 import TabLaminas from './TabLaminas';
 import TabPinturas from './TabPinturas';
+import TabBujes from './TabBujes';
+import TabMecanizadosTotem from './TabMecanizadosTotem';
 
 export default function PanelAdmin({ 
   API_BASE_URL,
@@ -12,10 +14,22 @@ export default function PanelAdmin({
   laminas = [], setLaminas, 
   tubos = [], setTubos, 
   accesorios = [], setAccesorios,
-  pinturas = [], setPinturas 
+  pinturas = [], setPinturas,
+  bujes: propBujes, setBujes: propSetBujes,
+  mecanizadosTotem: propMecanizados, setMecanizadosTotem: propSetMecanizados
 }) {
   const [tabAdmin, setTabAdmin] = useState('tubos');
   const [editandoId, setEditandoId] = useState(null);
+
+  // Estados locales como fallback para bujes y mecanizados
+  const [bujesLocales, setBujesLocales] = useState([]);
+  const [mecanizadosLocales, setMecanizadosLocales] = useState([]);
+
+  const bujes = propBujes !== undefined ? propBujes : bujesLocales;
+  const setBujes = propSetBujes || setBujesLocales;
+
+  const mecanizadosTotem = propMecanizados !== undefined ? propMecanizados : mecanizadosLocales;
+  const setMecanizadosTotem = propSetMecanizados || setMecanizadosLocales;
 
   const categoriasDisponibles = ['totems', 'postes', 'brazos', 'gabinetes'];
 
@@ -41,6 +55,14 @@ export default function PanelAdmin({
     nombre: '', hex: '#2563eb', precio_kg: ''
   });
 
+  const [nuevoBuje, setNuevoBuje] = useState({
+    nombre: '', precio: '', subtipo: 'ambos', categorias: ['brazos', 'postes']
+  });
+
+  const [nuevoMecanizado, setNuevoMecanizado] = useState({
+    clave: '', nombre: '', precio: '', es_lpr: false, area_m2: 0.08
+  });
+
   const RENDIMIENTO_M2_POR_KG = 8;
   const FACTOR_PINTURA = 1.5;
 
@@ -55,6 +77,24 @@ export default function PanelAdmin({
     if (typeof cats === 'string') return cats.split(',').map(c => c.trim()).filter(Boolean);
     return ['gabinetes', 'totems', 'postes', 'brazos'];
   };
+
+  // Carga inicial y refresco de bujes y mecanizados
+  const cargarBujesYMecanizados = async () => {
+    try {
+      const [resB, resM] = await Promise.all([
+        fetch(`${API_BASE_URL}/api/bujes`).then(r => r.ok ? r.json() : []),
+        fetch(`${API_BASE_URL}/api/mecanizados-totem`).then(r => r.ok ? r.json() : [])
+      ]);
+      if (Array.isArray(resB)) setBujes(resB);
+      if (Array.isArray(resM)) setMecanizadosTotem(resM);
+    } catch (err) {
+      console.warn("Error cargando bujes y mecanizados:", err);
+    }
+  };
+
+  useEffect(() => {
+    cargarBujesYMecanizados();
+  }, []);
 
   // --- GUARDAR Y ACTUALIZAR FUNCIONES ---
 
@@ -217,6 +257,78 @@ export default function PanelAdmin({
     }
   };
 
+  const handleAgregarBuje = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+
+    const catString = Array.isArray(nuevoBuje.categorias) ? nuevoBuje.categorias.join(',') : 'brazos,postes';
+    const payload = {
+      nombre: nuevoBuje.nombre || 'Buje Genérico',
+      precio: parseFloat(nuevoBuje.precio) || 0,
+      subtipo: nuevoBuje.subtipo || 'ambos',
+      categorias: catString
+    };
+
+    try {
+      const isEditing = editandoId !== null && editandoId !== undefined;
+      const method = isEditing ? 'PUT' : 'POST';
+      const endpoint = isEditing ? `${API_BASE_URL}/api/bujes/${editandoId}` : `${API_BASE_URL}/api/bujes`;
+
+      const res = await fetch(endpoint, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (res.ok) {
+        if (recargarDatos) await recargarDatos();
+        await cargarBujesYMecanizados();
+        setEditandoId(null);
+        setNuevoBuje({ nombre: '', precio: '', subtipo: 'ambos', categorias: ['brazos', 'postes'] });
+      } else {
+        const errorMsg = await res.text();
+        alert(`Error guardando buje: ${errorMsg}`);
+      }
+    } catch (err) {
+      console.error("Error al guardar buje:", err);
+    }
+  };
+
+  const handleAgregarMecanizado = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+
+    const payload = {
+      clave: nuevoMecanizado.clave || 'mecanizado_nuevo',
+      nombre: nuevoMecanizado.nombre || 'Mecanizado Nuevo',
+      precio: parseFloat(nuevoMecanizado.precio) || 0,
+      es_lpr: Boolean(nuevoMecanizado.es_lpr),
+      area_m2: parseFloat(nuevoMecanizado.area_m2) || 0.08
+    };
+
+    try {
+      const isEditing = editandoId !== null && editandoId !== undefined;
+      const method = isEditing ? 'PUT' : 'POST';
+      const endpoint = isEditing ? `${API_BASE_URL}/api/mecanizados-totem/${editandoId}` : `${API_BASE_URL}/api/mecanizados-totem`;
+
+      const res = await fetch(endpoint, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (res.ok) {
+        if (recargarDatos) await recargarDatos();
+        await cargarBujesYMecanizados();
+        setEditandoId(null);
+        setNuevoMecanizado({ clave: '', nombre: '', precio: '', es_lpr: false, area_m2: 0.08 });
+      } else {
+        const errorMsg = await res.text();
+        alert(`Error guardando mecanizado: ${errorMsg}`);
+      }
+    } catch (err) {
+      console.error("Error al guardar mecanizado:", err);
+    }
+  };
+
   // --- CARGA DE DATOS EN FORMULARIO PARA EDICIÓN ---
   const editarTubo = (t) => { 
     setEditandoId(t.id); 
@@ -254,12 +366,37 @@ export default function PanelAdmin({
     setNuevaPintura({ nombre: p.nombre || '', hex: p.hex || '#2563eb', precio_kg: p.precio_kg || p.precioKg || '' }); 
   };
 
+  const editarBuje = (b) => {
+    setEditandoId(b.id);
+    setNuevoBuje({
+      nombre: b.nombre || '',
+      precio: b.precio !== undefined ? b.precio : '',
+      subtipo: b.subtipo || 'ambos',
+      categorias: normalizarCategorias(b.categorias)
+    });
+  };
+
+  const editarMecanizado = (m) => {
+    setEditandoId(m.id);
+    setNuevoMecanizado({
+      clave: m.clave || '',
+      nombre: m.nombre || '',
+      precio: m.precio !== undefined ? m.precio : '',
+      es_lpr: Boolean(m.es_lpr || m.esLpr),
+      area_m2: m.area_m2 !== undefined ? m.area_m2 : 0.08
+    });
+  };
+
   const eliminarItem = async (id, tipo) => {
     if (!window.confirm(`¿Seguro que deseas eliminar este registro de la base de datos?`)) return;
     try {
       const res = await fetch(`${API_BASE_URL}/api/${tipo}/${id}`, { method: 'DELETE' });
       if (res.ok) {
         if (recargarDatos) await recargarDatos();
+        await cargarBujesYMecanizados();
+      } else {
+        const err = await res.text();
+        alert(`Error al eliminar: ${err}`);
       }
     } catch (err) {
       console.error(`Error eliminando ${tipo}:`, err);
@@ -289,11 +426,11 @@ export default function PanelAdmin({
     <div className="w-full h-full max-h-[calc(100vh-80px)] overflow-y-auto pb-10 space-y-4 text-xs text-gray-800">
       
       {/* Selector de pestañas */}
-      <div className="flex justify-between items-center bg-white border border-gray-200 p-3 rounded-xl shadow-sm">
+      <div className="flex flex-wrap justify-between items-center bg-white border border-gray-200 p-3 rounded-xl shadow-sm gap-2">
         <h2 className="text-sm font-bold text-gray-900 flex items-center gap-2">
           <Shield size={16} className="text-blue-600" /> Control de Inventario y Precios
         </h2>
-        <div className="flex bg-gray-100 p-1 rounded-lg border border-gray-200 gap-1">
+        <div className="flex flex-wrap bg-gray-100 p-1 rounded-lg border border-gray-200 gap-1">
           <button 
             onClick={() => cambiarPestana('tubos')} 
             className={`px-3 py-1 rounded-md font-semibold transition-all duration-150 ${
@@ -313,6 +450,26 @@ export default function PanelAdmin({
             }`}
           >
             <Wrench size={13} className="inline mr-1" /> Accesorios
+          </button>
+          <button 
+            onClick={() => cambiarPestana('bujes')} 
+            className={`px-3 py-1 rounded-md font-semibold transition-all duration-150 ${
+              tabAdmin === 'bujes' 
+                ? 'bg-white text-blue-600 shadow-sm border border-gray-200/60 font-bold' 
+                : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200/50'
+            }`}
+          >
+            <CircleDot size={13} className="inline mr-1" /> Bujes y Platinas
+          </button>
+          <button 
+            onClick={() => cambiarPestana('mecanizados')} 
+            className={`px-3 py-1 rounded-md font-semibold transition-all duration-150 ${
+              tabAdmin === 'mecanizados' 
+                ? 'bg-white text-blue-600 shadow-sm border border-gray-200/60 font-bold' 
+                : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200/50'
+            }`}
+          >
+            <Cpu size={13} className="inline mr-1" /> Mecanizados Tótem
           </button>
           <button 
             onClick={() => cambiarPestana('laminas')} 
@@ -353,6 +510,23 @@ export default function PanelAdmin({
           editandoId={editandoId} handleAgregarAccesorio={handleAgregarAccesorio} 
           editarAccesorio={editarAccesorio} eliminarItem={eliminarItem} 
           categoriasDisponibles={categoriasDisponibles} renderBadges={renderBadges} 
+        />
+      )}
+
+      {tabAdmin === 'bujes' && (
+        <TabBujes 
+          bujes={bujes} nuevoBuje={nuevoBuje} setNuevoBuje={setNuevoBuje} 
+          editandoId={editandoId} handleAgregarBuje={handleAgregarBuje} 
+          editarBuje={editarBuje} eliminarItem={eliminarItem} 
+          categoriasDisponibles={categoriasDisponibles} renderBadges={renderBadges} 
+        />
+      )}
+
+      {tabAdmin === 'mecanizados' && (
+        <TabMecanizadosTotem 
+          mecanizadosTotem={mecanizadosTotem} nuevoMecanizado={nuevoMecanizado} setNuevoMecanizado={setNuevoMecanizado} 
+          editandoId={editandoId} handleAgregarMecanizado={handleAgregarMecanizado} 
+          editarMecanizado={editarMecanizado} eliminarItem={eliminarItem} 
         />
       )}
 

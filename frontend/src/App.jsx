@@ -57,6 +57,8 @@ export default function App() {
   const [consecutivo, setConsecutivo] = useState('COT-2001');
   const [categoriaSel, setCategoriaSel] = useState('gabinetes');
   const [nivelPrecio, setNivelPrecio] = useState(1);
+  const [clienteSeleccionado, setClienteSeleccionado] = useState(null);
+  const [notas, setNotas] = useState('');
   const [cargandoCotizacion, setCargandoCotizacion] = useState(false);
   const [errorBackend, setErrorBackend] = useState(null);
   const [mensajeExito, setMensajeExito] = useState(null);
@@ -114,18 +116,38 @@ export default function App() {
     return local ? JSON.parse(local) : [];
   });
 
+  const [bujes, setBujes] = useState(() => {
+    const local = localStorage.getItem('m3_bujes');
+    return local ? JSON.parse(local) : [];
+  });
+
+  const [mecanizadosTotem, setMecanizadosTotem] = useState(() => {
+    const local = localStorage.getItem('m3_mecanizados_totem');
+    return local ? JSON.parse(local) : [];
+  });
+
   useEffect(() => {
     localStorage.setItem('m3_brazos', JSON.stringify(brazos));
   }, [brazos]);
 
+  useEffect(() => {
+    localStorage.setItem('m3_bujes', JSON.stringify(bujes));
+  }, [bujes]);
+
+  useEffect(() => {
+    localStorage.setItem('m3_mecanizados_totem', JSON.stringify(mecanizadosTotem));
+  }, [mecanizadosTotem]);
+
   const cargarDatosServidor = async () => {
     try {
-      const [resLaminas, resTubos, resAcc, resPin, resBrazos] = await Promise.all([
+      const [resLaminas, resTubos, resAcc, resPin, resBrazos, resBujes, resMecanizados] = await Promise.all([
         fetch(`${API_BASE_URL}/api/laminas`).then(r => r.ok ? r.json() : null),
         fetch(`${API_BASE_URL}/api/tubos`).then(r => r.ok ? r.json() : null),
         fetch(`${API_BASE_URL}/api/accesorios`).then(r => r.ok ? r.json() : null),
         fetch(`${API_BASE_URL}/api/pinturas`).then(r => r.ok ? r.json() : null),
-        fetch(`${API_BASE_URL}/api/brazos`).then(r => r.ok ? r.json() : null)
+        fetch(`${API_BASE_URL}/api/brazos`).then(r => r.ok ? r.json() : null),
+        fetch(`${API_BASE_URL}/api/bujes`).then(r => r.ok ? r.json() : null),
+        fetch(`${API_BASE_URL}/api/mecanizados-totem`).then(r => r.ok ? r.json() : null)
       ]);
 
       if (resLaminas && resLaminas.length > 0) setLaminas(resLaminas);
@@ -133,6 +155,8 @@ export default function App() {
       if (resAcc && resAcc.length > 0) setAccesorios(resAcc);
       if (resPin && resPin.length > 0) setPinturas(resPin);
       if (resBrazos && resBrazos.length > 0) setBrazos(resBrazos);
+      if (resBujes && resBujes.length > 0) setBujes(resBujes);
+      if (resMecanizados && resMecanizados.length > 0) setMecanizadosTotem(resMecanizados);
     } catch (err) {
       console.warn("Utilizando registros locales sincronizados por ausencia de backend:", err);
     }
@@ -202,6 +226,8 @@ export default function App() {
 
   const handleNuevaCotizacion = async () => {
     setItemsCotizacion([]);
+    setClienteSeleccionado(null);
+    setNotas('');
     await obtenerSiguienteConsecutivo();
     setEditandoFormulario(true);
     setMensajeExito("Nueva cotización iniciada.");
@@ -376,7 +402,9 @@ const handleAgregarACotizacion = async (payload = {}) => {
       bujesSeleccionados: paramsParaBackend.bujesSeleccionados,
       detallesAccesorios: paramsParaBackend.detallesAccesorios,
       cantidadesAcc: paramsUnificados.cantidadesAcc,
-      accesoriosLista: dataServidor?.accesorios_lista || []
+      accesoriosLista: dataServidor?.accesorios_lista || [],
+      params: { ...paramsParaBackend, categoria: (categoriaSel || '').toUpperCase() },
+      configuracion: { ...paramsParaBackend, categoria: (categoriaSel || '').toUpperCase() }
     };
 
     setItemsCotizacion(prev => [...prev, nuevoItem]);
@@ -387,7 +415,13 @@ const handleAgregarACotizacion = async (payload = {}) => {
     setTimeout(() => setMensajeExito(null), 2500);
   };
 
-  const handleGuardarCotizacionBD = async () => {
+  const handleGuardarCotizacionBD = async (datosGuardados = null) => {
+    if (datosGuardados && datosGuardados.consecutivo_guardado) {
+      setConsecutivo(datosGuardados.consecutivo_guardado);
+      cargarHistorial();
+      return;
+    }
+
     if (itemsCotizacion.length === 0) {
       alert("No hay ítems para guardar en la cotización.");
       return;
@@ -395,16 +429,39 @@ const handleAgregarACotizacion = async (payload = {}) => {
 
     const totalCotizacion = itemsCotizacion.reduce((acc, curr) => acc + (curr.total || 0), 0);
 
+    const itemsPayload = itemsCotizacion.map(item => ({
+      categoria: item.categoria || 'GABINETES',
+      descripcion: item.descripcion || 'Estructura Metalmecánica',
+      lamina: item.lamina || '',
+      pintura: item.pintura || '',
+      costoPintura: item.costoPintura || 0,
+      costoTubos: item.costoTubos || 0,
+      areaPintable: item.areaPintable || 0,
+      alto: item.alto || 0,
+      ancho: item.ancho || 0,
+      fondo: item.fondo || 0,
+      costoBase: item.costoBase || 0,
+      total: item.total || 0,
+      accesoriosLista: item.accesoriosLista || [],
+      configuracion: item.configuracion || item.params || item.detalles || item,
+      params: item.params || item.configuracion || item.detalles || item
+    }));
+
     try {
       const res = await fetch(`${API_BASE_URL}/api/cotizaciones/guardar`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           consecutivo: consecutivo,
-          clienteNombre: 'Cliente General (Sin NIT)',
+          cliente_id: clienteSeleccionado?.id || null,
+          clienteId: clienteSeleccionado?.id || null,
+          clienteNombre: clienteSeleccionado?.nombre || 'Consumidor Final / Mostrador',
+          clienteNit: clienteSeleccionado?.nit || null,
+          observaciones: notas || '',
+          notas: notas || '',
           nivelPrecio: nivelPrecio,
           total: totalCotizacion,
-          items: itemsCotizacion
+          items: itemsPayload
         })
       });
 
@@ -413,8 +470,9 @@ const handleAgregarACotizacion = async (payload = {}) => {
       const data = await res.json();
       setMensajeExito(`Cotización ${data.consecutivo_guardado} guardada correctamente.`);
       
-      setConsecutivo(data.siguiente_consecutivo);
-      setItemsCotizacion([]);
+      if (data.consecutivo_guardado) {
+        setConsecutivo(data.consecutivo_guardado);
+      }
       cargarHistorial();
 
       setTimeout(() => setMensajeExito(null), 4000);
@@ -437,41 +495,63 @@ const handleAgregarACotizacion = async (payload = {}) => {
       const itemsCargados = data.items || [];
       setItemsCotizacion(itemsCargados);
 
+      // Cargar observaciones
+      setNotas(data.observaciones || '');
+
+      // Cargar cliente asignado
+      if (data.cliente_id || data.cliente_nombre) {
+        setClienteSeleccionado({
+          id: data.cliente_id || null,
+          nombre: data.cliente_nombre || 'Consumidor Final / Mostrador',
+          nit: data.cliente_nit || '',
+          nit_cedula: data.cliente_nit || ''
+        });
+      } else {
+        setClienteSeleccionado(null);
+      }
+
       if (itemsCargados.length > 0) {
         const primerItem = itemsCargados[0];
-        const detalles = primerItem.detalles || {};
+        const configRestaurada = primerItem.configuracion || primerItem.params || primerItem.detalles || {};
         
-        const catRecuperada = (primerItem.categoria || data.categoria || 'gabinetes').toLowerCase();
+        const catRecuperada = (primerItem.categoria || configRestaurada.categoria || 'gabinetes').toLowerCase();
         setCategoriaSel(catRecuperada);
 
-        const altoReal = parseFloat(primerItem.alto || detalles.alto || 150);
-        const anchoReal = parseFloat(primerItem.ancho || detalles.ancho || 50);
-        const fondoReal = parseFloat(primerItem.fondo || detalles.fondo || 30);
-        const laminaReal = primerItem.laminaId || detalles.laminaId || primerItem.lamina || '';
+        const altoReal = parseFloat(configRestaurada.alto ?? primerItem.alto ?? 150);
+        const anchoReal = parseFloat(configRestaurada.ancho ?? primerItem.ancho ?? 50);
+        const fondoReal = parseFloat(configRestaurada.fondo ?? primerItem.fondo ?? 30);
+        const laminaReal = configRestaurada.laminaId || configRestaurada.lamina || primerItem.laminaId || primerItem.lamina || '';
 
-        setParams(prev => ({
-          ...prev,
-          ...detalles,
-          ...primerItem,
+        const paramsRestaurados = {
+          ...configRestaurada,
           categoria: catRecuperada,
           alto: altoReal,
           ancho: anchoReal,
           fondo: fondoReal,
           laminaId: laminaReal,
-          incluirBase: primerItem.incluirBase ?? detalles.incluirBase ?? true,
-          incluirPlatina: primerItem.incluirPlatina ?? detalles.incluirPlatina ?? true,
-          formaBase: primerItem.formaBase || detalles.formaBase || 'Base Redonda',
-          ladoBase: primerItem.ladoBase || detalles.ladoBase || 25,
-          colorPintura: primerItem.colorPintura || detalles.colorPintura || primerItem.pintura || '#2563eb',
-          nombrePintura: primerItem.nombrePintura || primerItem.pintura || 'Estándar',
-          tramos: primerItem.tramos || detalles.tramos || prev.tramos,
-          accesoriosSeleccionados: primerItem.accesoriosSeleccionados || detalles.accesoriosSeleccionados || [],
-          detallesAccesorios: primerItem.detallesAccesorios || detalles.detallesAccesorios || {},
-          cantidadesAcc: primerItem.cantidadesAcc || detalles.cantidadesAcc || {}
-        }));
+          incluirBase: configRestaurada.incluirBase ?? primerItem.incluirBase ?? true,
+          incluirPlatina: configRestaurada.incluirPlatina ?? primerItem.incluirPlatina ?? true,
+          formaBase: configRestaurada.formaBase || primerItem.formaBase || 'Base Redonda',
+          ladoBase: configRestaurada.ladoBase || primerItem.ladoBase || 25,
+          colorPintura: configRestaurada.colorPintura || primerItem.colorPintura || primerItem.pintura || '#2563eb',
+          nombrePintura: configRestaurada.nombrePintura || primerItem.nombrePintura || primerItem.pintura || 'Estándar',
+          tramos: configRestaurada.tramos || primerItem.tramos || [],
+          accesoriosSeleccionados: configRestaurada.accesoriosSeleccionados || primerItem.accesoriosSeleccionados || [],
+          bujesSeleccionados: configRestaurada.bujesSeleccionados || primerItem.bujesSeleccionados || [],
+          bujeInicialId: configRestaurada.bujeInicialId || primerItem.bujeInicialId || '',
+          bujeFinalId: configRestaurada.bujeFinalId || primerItem.bujeFinalId || '',
+          detallesAccesorios: configRestaurada.detallesAccesorios || primerItem.detallesAccesorios || {},
+          cantidadesAcc: configRestaurada.cantidadesAcc || primerItem.cantidadesAcc || {},
+          incluirBioporter: configRestaurada.incluirBioporter ?? primerItem.incluirBioporter ?? false,
+          incluirPiesAmigo: configRestaurada.incluirPiesAmigo ?? primerItem.incluirPiesAmigo ?? true,
+          cantidadPies: configRestaurada.cantidadPies ?? primerItem.cantidadPies ?? 4,
+          altoCartela: configRestaurada.altoCartela ?? primerItem.altoCartela ?? 10
+        };
+
+        setParams(paramsRestaurados);
       }
 
-      setEditandoFormulario(false);
+      setEditandoFormulario(true);
       setTabActual('cotizador');
       setMensajeExito(`Cotización ${data.consecutivo} cargada en el cotizador.`);
       setTimeout(() => setMensajeExito(null), 3000);
@@ -570,6 +650,7 @@ const handleAgregarACotizacion = async (payload = {}) => {
                 tubos={tubos}
                 accesorios={accesorios} 
                 pinturas={pinturas}
+                bujes={bujes}
                 handleAgregar={handleAgregarACotizacion} 
                 cargando={cargandoCotizacion}
               />
@@ -583,6 +664,11 @@ const handleAgregarACotizacion = async (payload = {}) => {
                   consecutivo={consecutivo}
                   setConsecutivo={setConsecutivo}
                   visorRef={visorRef}
+                  clienteSeleccionado={clienteSeleccionado}
+                  setClienteSeleccionado={setClienteSeleccionado}
+                  notas={notas}
+                  setNotas={setNotas}
+                  API_BASE_URL={API_BASE_URL}
                   onGuardarCotizacion={handleGuardarCotizacionBD}
                 />
               </div>
@@ -625,6 +711,8 @@ const handleAgregarACotizacion = async (payload = {}) => {
             tubos={tubos} setTubos={setTubos}
             accesorios={accesorios} setAccesorios={setAccesorios}
             pinturas={pinturas} setPinturas={setPinturas}
+            bujes={bujes} setBujes={setBujes}
+            mecanizadosTotem={mecanizadosTotem} setMecanizadosTotem={setMecanizadosTotem}
             params={params} setParams={actualizarParams}
           />
         )}

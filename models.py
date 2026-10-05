@@ -75,6 +75,17 @@ class Buje(Base):
     categorias = Column(String, default="brazos")
 
 
+class MecanizadoTotem(Base):
+    __tablename__ = "mecanizados_totem"
+
+    id = Column(Integer, primary_key=True, index=True)
+    clave = Column(String, unique=True, index=True, nullable=False)
+    nombre = Column(String, nullable=False)
+    precio = Column(Float, default=35000.0)
+    es_lpr = Column(Boolean, default=False)
+    area_m2 = Column(Float, default=0.08)
+
+
 class Brazo(Base):
     __tablename__ = "brazos"
 
@@ -115,8 +126,11 @@ class Cotizacion(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     consecutivo = Column(String, unique=True, index=True, nullable=False) # ej. COT-2001
-    cliente_nombre = Column(String, default="Cliente General (Sin NIT)")
+    cliente_id = Column(Integer, nullable=True)
+    cliente_nombre = Column(String, default="Consumidor Final / Mostrador")
     cliente_nit = Column(String, nullable=True)
+    observaciones = Column(String, nullable=True)
+    estado = Column(String, default="ACTIVA")
     fecha_creacion = Column(DateTime, default=datetime.utcnow)
     total = Column(Float, default=0.0)
     nivel_precio = Column(Integer, default=1)
@@ -142,5 +156,6 @@ class CotizacionItem(Base):
     costo_base = Column(Float, default=0.0)
     total = Column(Float, default=0.0)
     accesorios_json = Column(Text, nullable=True) # Guardado estructurado como String/JSON
+    configuracion_json = Column(Text, nullable=True) # Objeto completo de configuración/params
 
     cotizacion = relationship("Cotizacion", back_populates="items")

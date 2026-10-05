@@ -60,8 +60,87 @@ export function buildBrazo(params = {}, tubosLista = [], accesoriosLista = [], l
   const bujeInicialVal = params.bujeInicial || params.bujeInicialId || params.buje_inicial_id || params.bujeBase;
   renderizarBujeOBase(loader, bujeInicialVal, p0, dirInicial, materialTubo, grupoBrazo, false, radioTuboM);
 
-  // 5. Renderizado del Buje Final
-  const bujeFinalVal = params.bujeFinal || params.bujeFinalId || params.buje_final_id || params.bujePunta;
+  // 4.1 Caperuza embellecedora / Cubre-anclaje en base (Cilindro plano y bajo)
+  const tieneCaperuza = Boolean(
+    params.caperuzaBase ||
+    params.cubreAnclaje ||
+    params.caperuza ||
+    (params.accesoriosSeleccionados || []).some(
+      (a) => String(typeof a === 'object' ? a.id : a).toLowerCase().includes('caperuza')
+    )
+  );
+
+  if (tieneCaperuza) {
+    const altoCaperuzaM = 0.085; // 8.5 cm de altura (entre 7 y 10 cm, plano y bajo)
+    const radioCaperuzaM = Math.max(radioTuboM * 4.6, 0.135); // Diámetro ~27 cm, tapa pernos y platina a ras de suelo
+
+    const grupoCaperuza = new THREE.Group();
+    grupoCaperuza.name = 'CaperuzaEmbellecedoraBase';
+
+    // 1. Cilindro recto embellecedor principal (plano, sin forma cónica/embudo)
+    const caperuzaGeo = new THREE.CylinderGeometry(
+      radioCaperuzaM,
+      radioCaperuzaM,
+      altoCaperuzaM,
+      48,
+      1,
+      false
+    );
+    const caperuzaMesh = new THREE.Mesh(caperuzaGeo, materialTubo);
+    caperuzaMesh.position.y = altoCaperuzaM / 2;
+    caperuzaMesh.castShadow = true;
+    caperuzaMesh.receiveShadow = true;
+    grupoCaperuza.add(caperuzaMesh);
+
+    // 2. Bisel superior redondeado en la arista de la tapa plana
+    const biselSuperiorGeo = new THREE.TorusGeometry(radioCaperuzaM - 0.003, 0.003, 16, 48);
+    biselSuperiorGeo.rotateX(Math.PI / 2);
+    const biselSuperior = new THREE.Mesh(biselSuperiorGeo, materialTubo);
+    biselSuperior.position.y = altoCaperuzaM;
+    grupoCaperuza.add(biselSuperior);
+
+    // 3. Collarín concéntrico en el cuello del tubo
+    const collarinCuelloGeo = new THREE.CylinderGeometry(
+      radioTuboM + 0.007,
+      radioTuboM + 0.007,
+      0.006,
+      32
+    );
+    const collarinCuello = new THREE.Mesh(collarinCuelloGeo, materialTubo);
+    collarinCuello.position.y = altoCaperuzaM + 0.003;
+    grupoCaperuza.add(collarinCuello);
+
+    // 4. Reborde perimetral a ras de suelo
+    const aroBaseGeo = new THREE.TorusGeometry(radioCaperuzaM, 0.0035, 16, 48);
+    aroBaseGeo.rotateX(Math.PI / 2);
+    const aroBaseMesh = new THREE.Mesh(aroBaseGeo, materialTubo);
+    aroBaseMesh.position.y = 0.0035;
+    grupoCaperuza.add(aroBaseMesh);
+
+    const cuaternionCaperuza = new THREE.Quaternion().setFromUnitVectors(
+      new THREE.Vector3(0, 1, 0),
+      dirInicial
+    );
+    grupoCaperuza.position.copy(p0);
+    grupoCaperuza.quaternion.copy(cuaternionCaperuza);
+
+    grupoBrazo.add(grupoCaperuza);
+  }
+
+  // 5. Renderizado del Buje Final o Accesorio Videoportero en Punta
+  let bujeFinalVal = params.bujeFinal || params.bujeFinalId || params.buje_final_id || params.bujePunta;
+  const tieneVideoporteroPunta = Boolean(
+    params.videoporteroPunta ||
+    params.accesorioPunta === 'videoportero' ||
+    (params.accesoriosSeleccionados || []).some(
+      (a) => String(typeof a === 'object' ? a.id : a).toLowerCase().includes('videoportero')
+    )
+  );
+
+  if (tieneVideoporteroPunta && !bujeFinalVal) {
+    bujeFinalVal = 'Soporte Videoportero en Punta';
+  }
+
   if (puntosVertices.length >= 2) {
     const pUltimo = puntosVertices[puntosVertices.length - 1];
     const pPenultimo = puntosVertices[puntosVertices.length - 2];
