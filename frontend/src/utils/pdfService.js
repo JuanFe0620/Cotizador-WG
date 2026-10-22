@@ -23,6 +23,8 @@ export const exportarPdfTecnico = async ({
   clienteSeleccionado,
   vendedor = "ZAPATA CARRANZA PAOLA KATHERINE - 0012",
   disenador = "WILFRED GARCIA",
+  notas = "",
+  observaciones = "",
   porcentajeAnticipo = 50,
   porcentajeSaldo = 50,
   tiempoEntregaDias = 8,
@@ -36,7 +38,12 @@ export const exportarPdfTecnico = async ({
   numeroALetrasCOP,
   formatoMonedaSinSimbolo,
   visorRef,
-  setGenerandoPdf
+  setGenerandoPdf,
+  // Marca blanca: datos del distribuidor activo { nombre, nit, telefono, correo, direccion, logo }.
+  // null => membrete institucional de la fábrica (WG).
+  membrete = null,
+  vendedoresLista: vendedoresListaProp = null,
+  disenadoresLista: disenadoresListaProp = null
 }) => {
   if (items.length === 0) return;
   
@@ -66,11 +73,10 @@ export const exportarPdfTecnico = async ({
       fecha: new Date().toISOString()
     };
 
-    fetch('http://127.0.0.1:8000/api/cotizaciones/guardar', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payloadCotizacion)
-    }).catch(e => console.error("Error guardando historial:", e));
+    // La persistencia se realiza en Resumen.guardarCotizacionBD (incluye notas, asesor y diseñador).
+    // Este PDF no vuelve a postear a /guardar para no sobrescribir esos campos con valores vacíos.
+
+    const textoNotas = limpiarTextoTipografico((notas || observaciones || '').trim());
 
     const pdf = new jsPDF('p', 'mm', 'a4');
     const doc = pdf;
@@ -159,9 +165,33 @@ export const exportarPdfTecnico = async ({
     fechaEntregaAprox.setDate(fechaActual.getDate() + 12);
     const fechaEntregaAproxStr = fechaEntregaAprox.toLocaleDateString('es-CO');
 
-    // 1. CABECERA E INSTITUCIONAL
+    // 1. CABECERA E INSTITUCIONAL (marca blanca: fábrica o distribuidor)
+    const nombreEmpresaPdf = membrete ? (membrete.nombre || 'DISTRIBUIDOR') : "WG INGENIERÍA";
+
+    // Inserta una imagen dentro de una caja, conservando la proporción
+    const insertarLogoAjustado = (dataUrl, formato, x, yPos, maxAncho, maxAlto) => {
+      let w = maxAncho;
+      let h = maxAlto;
+      try {
+        const props = pdf.getImageProperties(dataUrl);
+        const escala = Math.min(maxAncho / props.width, maxAlto / props.height);
+        w = props.width * escala;
+        h = props.height * escala;
+      } catch (e) { /* usa la caja completa */ }
+      originalAddImage(dataUrl, formato, x, yPos, w, h);
+    };
+
+    const textoLogoFallback = () => {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(14);
+      doc.setTextColor(0, 51, 102);
+      doc.text(nombreEmpresaPdf.length > 28 ? nombreEmpresaPdf.slice(0, 28) : nombreEmpresaPdf, 14, 18);
+    };
+
     try {
       const cargarLogoBase64 = async () => {
+        // Distribuidor: SOLO su propio logo (nunca el de la fábrica)
+        if (membrete) return membrete.logo || null;
         try {
           const res = await fetch('/logo.png');
           if (!res.ok) return null;
@@ -180,31 +210,37 @@ export const exportarPdfTecnico = async ({
       const logoDataUrl = await cargarLogoBase64();
 
       if (logoDataUrl && validarImagenBase64(logoDataUrl)) {
-        // Ancho 38mm y Alto 14mm proporcionales para el encabezado
-        originalAddImage(logoDataUrl, 'PNG', 10, 8, 30, 14);
+        const formatoLogo = logoDataUrl.startsWith('data:image/jpeg') ? 'JPEG' : 'PNG';
+        insertarLogoAjustado(logoDataUrl, formatoLogo, 10, 8, 38, 16);
       } else {
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(14);
-        doc.setTextColor(0, 51, 102);
-        doc.text("WG INGENIERÍA", 14, 18);
+        textoLogoFallback();
       }
     } catch (err) {
       console.warn("⚠️ [PDF] Error insertando logo corporativo:", err);
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(14);
-      doc.setTextColor(0, 51, 102);
-      doc.text("WG INGENIERÍA", 14, 18);
+      textoLogoFallback();
     }
 
     pdf.setFontSize(8);
     pdf.setFont('helvetica', 'bold');
     pdf.setTextColor(0, 0, 0);
-    pdf.text("WG INGENIERIA Y COMUNICACIONES EYH S.A.S", 14, 28);
-    pdf.setFont('helvetica', 'normal');
-    pdf.setFontSize(7);
-    pdf.text("NIT: 900.708.792-1 | Actividad Económica 4652", 14, 32);
-    pdf.text("Carrera 22 No. 13-58 Bodega 3 - Bogotá / Colombia", 14, 36);
-    pdf.text("Tel: 3107606149 / 3002908678 | wgingenieria@outlook.com", 14, 40);
+    if (membrete) {
+      pdf.text(String(membrete.nombre || '').toUpperCase(), 14, 28);
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(7);
+      const lineasMembrete = [
+        membrete.nit ? `NIT: ${membrete.nit}` : '',
+        membrete.direccion || '',
+        [membrete.telefono ? `Tel: ${membrete.telefono}` : '', membrete.correo || ''].filter(Boolean).join(' | ')
+      ].filter(Boolean);
+      lineasMembrete.forEach((linea, idx) => pdf.text(linea, 14, 32 + idx * 4));
+    } else {
+      pdf.text("WG INGENIERIA Y COMUNICACIONES EYH S.A.S", 14, 28);
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(7);
+      pdf.text("NIT: 900.708.792-1 | Actividad Económica 4652", 14, 32);
+      pdf.text("Carrera 22 No. 13-58 Bodega 3 - Bogotá / Colombia", 14, 36);
+      pdf.text("Tel: 3107606149 / 3002908678 | wgingenieria@outlook.com", 14, 40);
+    }
 
     // TÍTULO DEL DOCUMENTO
     pdf.setFont('helvetica', 'bold');
@@ -262,7 +298,7 @@ export const exportarPdfTecnico = async ({
     comboVendedor.Rect = [32, 57, 75, 5];
     comboVendedor.fontSize = 6.5;
     
-    const vendedoresLista = [
+    const vendedoresLista = (vendedoresListaProp && vendedoresListaProp.length > 0) ? vendedoresListaProp : (membrete ? [vendedor || ' '] : [
       "CORTES TORRES SANDRA PATRICIA - 0013",
       "DUARTE RODRIGUEZ GUILLERMO - 0011",
       "FARFAN CIFUENTES CRISTIAN FELIPE - 0008",
@@ -270,7 +306,7 @@ export const exportarPdfTecnico = async ({
       "GARCIA CARRANZA WILFRED HERNANDO - 0002",
       "RAMIREZ CARRANZA NORA VIVIANA - 0016",
       "ZAPATA CARRANZA PAOLA KATHERINE - 0012"
-    ];
+    ]);
 
     comboVendedor.setOptions(vendedoresLista);
     const valorInicialVendedor = vendedoresLista.includes(vendedor) ? vendedor : vendedoresLista[0];
@@ -282,10 +318,11 @@ export const exportarPdfTecnico = async ({
     comboDisenador.Rect = [128, 57, 65, 5];
     comboDisenador.fontSize = 6.5;
 
-    const disenadoresLista = [
+    const disenadoresLista = (disenadoresListaProp && disenadoresListaProp.length > 0) ? disenadoresListaProp : (membrete ? [disenador || ' '] : [
       "WILFRED GARCIA",
-      "LINA PUELLO"
-    ];
+      "LINA PUELLO",
+      "INGENIERÍA WG"
+    ]);
 
     comboDisenador.setOptions(disenadoresLista);
     const valorInicialDisenador = disenadoresLista.includes(disenador) ? disenador : disenadoresLista[0];
@@ -345,7 +382,7 @@ export const exportarPdfTecnico = async ({
         const ancho = item.ancho || item.detalles?.ancho || 60;
         const fondo = item.fondo || item.detalles?.fondo || 60;
         const lamina = item.lamina || item.tipoLamina || 'CR';
-        const calibre = item.calibre || 20;
+        const calibre = item.calibre;
 
         pdf.setFont('helvetica', 'bold');
         pdf.setTextColor(60, 60, 60);
@@ -465,8 +502,32 @@ export const exportarPdfTecnico = async ({
     pdf.text("El producto final puede presentar variaciones o diferencias técnicas menores", 16, totalBoxY + 27);
     pdf.text("derivadas de los procesos de manufactura y tolerancia de materiales.", 16, totalBoxY + 30);
 
+    // NOTAS Y CONDICIONES COMERCIALES (observaciones capturadas por el usuario)
+    let yNotasFin = totalBoxY + 32;
+    if (textoNotas) {
+      const anchoUtil = 178;
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(7);
+      const lineasNotas = pdf.splitTextToSize(textoNotas, anchoUtil);
+      const altoNotas = 9 + lineasNotas.length * 3.4;
+      let yNotas = totalBoxY + 36;
+      if (yNotas + altoNotas > 280) { pdf.addPage(); yNotas = 20; }
+      pdf.setFillColor(248, 250, 252);
+      pdf.setDrawColor(203, 213, 225);
+      pdf.rect(14, yNotas, 182, altoNotas, 'FD');
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(7);
+      pdf.setTextColor(0, 51, 102);
+      pdf.text("NOTAS Y CONDICIONES COMERCIALES", 16, yNotas + 5);
+      pdf.setFont('helvetica', 'normal');
+      pdf.setTextColor(40, 40, 40);
+      pdf.text(lineasNotas, 16, yNotas + 9.5);
+      yNotasFin = yNotas + altoNotas;
+    }
+
     // FIRMA DE CONFORMIDAD
-    y = totalBoxY + 55;
+    y = Math.max(totalBoxY + 55, yNotasFin + 15);
+    if (y > 285) { pdf.addPage(); y = 25; }
     pdf.setFont('helvetica', 'normal');
     pdf.setFontSize(7);
     pdf.setTextColor(0, 0, 0);
@@ -485,7 +546,10 @@ export const exportarPdfTecnico = async ({
           console.warn("⚠️ [PDF] Error precargando modelo 3D para ítem:", e);
         }
       }
-      await construirPaginaPlanoCAD(pdf, visorRef, item, index + 1);
+      await construirPaginaPlanoCAD(pdf, visorRef, item, index + 1, {
+        nombre: membrete ? membrete.nombre : 'Fábrica WG',
+        consecutivo
+      });
     }
 
     // 2. Descarga segura mediante Blob Binario

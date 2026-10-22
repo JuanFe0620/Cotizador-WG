@@ -1,20 +1,45 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   Calculator, Settings, Eye, AlertCircle, History, 
-  CheckCircle2, Plus, ChevronLeft, ChevronRight 
+  CheckCircle2, Plus, ChevronLeft, ChevronRight, UserCog, LogOut 
 } from 'lucide-react';
 
 import Configurador from './components/Cotizador/Configurador';
-import Resumen from './components/Cotizador/Resumen';
+import Resumen, { LISTA_VENDEDORES, LISTA_DISENADORES } from './components/Cotizador/Resumen';
 import VisorM3 from './components/Visor3D/VisorM3';
 import Galeria from './components/Galeria/Galeria';
 import PanelAdmin from './components/Admin/PanelAdmin';
 import HistorialCotizaciones from './components/Historial/HistorialCotizaciones';
+import { calcularCostosBrazoParametrico } from './utils/costeoBrazos';
+import { useAuth } from './context/AuthContext';
+import ModalMiPerfil from './components/Perfil/ModalMiPerfil';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
 
 export default function App() {
+  const { user, perfil, esSuperAdmin, esDistribuidor, logout } = useAuth();
+  const [modalPerfil, setModalPerfil] = useState(false);
   const [tabActual, setTabActual] = useState('cotizador');
+
+  // Equipo: el distribuidor usa SU personal; la fábrica conserva las listas por defecto
+  const listaVendedores = useMemo(
+    () => (esDistribuidor ? (perfil?.personal || []).filter(p => p.tipo === 'ASESOR').map(p => p.nombre) : LISTA_VENDEDORES),
+    [esDistribuidor, perfil]
+  );
+  const listaDisenadores = useMemo(
+    () => (esDistribuidor ? (perfil?.personal || []).filter(p => p.tipo === 'DISENADOR').map(p => p.nombre) : LISTA_DISENADORES),
+    [esDistribuidor, perfil]
+  );
+
+  // Marca blanca para el PDF (null => membrete de fábrica)
+  const membretePdf = useMemo(() => (esDistribuidor && perfil ? {
+    nombre: perfil.nombre_comercial,
+    nit: perfil.nit,
+    telefono: perfil.telefono,
+    correo: perfil.correo,
+    direccion: perfil.direccion,
+    logo: perfil.logo_url
+  } : null), [esDistribuidor, perfil]);
   const visorRef = useRef(null);
   
   const [laminas, setLaminas] = useState(() => {
@@ -55,13 +80,22 @@ export default function App() {
 
   const [itemsCotizacion, setItemsCotizacion] = useState([]);
   const [consecutivo, setConsecutivo] = useState('COT-2001');
+  const [cotizacionId, setCotizacionId] = useState(null);
   const [categoriaSel, setCategoriaSel] = useState('gabinetes');
   const [nivelPrecio, setNivelPrecio] = useState(1);
   const [clienteSeleccionado, setClienteSeleccionado] = useState(null);
   const [notas, setNotas] = useState('');
+  const [vendedor, setVendedor] = useState(listaVendedores[0] || '');
+  const [disenador, setDisenador] = useState(listaDisenadores[0] || '');
   const [cargandoCotizacion, setCargandoCotizacion] = useState(false);
   const [errorBackend, setErrorBackend] = useState(null);
   const [mensajeExito, setMensajeExito] = useState(null);
+
+  // Si el equipo cambia (Mi Perfil) y no hay selección, tomar el primero disponible
+  useEffect(() => {
+    if (!vendedor && listaVendedores[0]) setVendedor(listaVendedores[0]);
+    if (!disenador && listaDisenadores[0]) setDisenador(listaDisenadores[0]);
+  }, [listaVendedores, listaDisenadores]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [historialCotizaciones, setHistorialCotizaciones] = useState([]);
   const [editandoFormulario, setEditandoFormulario] = useState(true);
@@ -140,19 +174,24 @@ export default function App() {
 
   const cargarDatosServidor = async () => {
     try {
+      const ts = Date.now();
+      const fetchOpts = { cache: 'no-store', headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate', 'Pragma': 'no-cache' } };
       const [resLaminas, resTubos, resAcc, resPin, resBrazos, resBujes, resMecanizados] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/laminas`).then(r => r.ok ? r.json() : null),
-        fetch(`${API_BASE_URL}/api/tubos`).then(r => r.ok ? r.json() : null),
-        fetch(`${API_BASE_URL}/api/accesorios`).then(r => r.ok ? r.json() : null),
-        fetch(`${API_BASE_URL}/api/pinturas`).then(r => r.ok ? r.json() : null),
-        fetch(`${API_BASE_URL}/api/brazos`).then(r => r.ok ? r.json() : null),
-        fetch(`${API_BASE_URL}/api/bujes`).then(r => r.ok ? r.json() : null),
-        fetch(`${API_BASE_URL}/api/mecanizados-totem`).then(r => r.ok ? r.json() : null)
+        fetch(`${API_BASE_URL}/api/laminas?_t=${ts}`, fetchOpts).then(r => r.ok ? r.json() : null),
+        fetch(`${API_BASE_URL}/api/tubos?_t=${ts}`, fetchOpts).then(r => r.ok ? r.json() : null),
+        fetch(`${API_BASE_URL}/api/accesorios?_t=${ts}`, fetchOpts).then(r => r.ok ? r.json() : null),
+        fetch(`${API_BASE_URL}/api/pinturas?_t=${ts}`, fetchOpts).then(r => r.ok ? r.json() : null),
+        fetch(`${API_BASE_URL}/api/brazos?_t=${ts}`, fetchOpts).then(r => r.ok ? r.json() : null),
+        fetch(`${API_BASE_URL}/api/bujes?_t=${ts}`, fetchOpts).then(r => r.ok ? r.json() : null),
+        fetch(`${API_BASE_URL}/api/mecanizados-totem?_t=${ts}`, fetchOpts).then(r => r.ok ? r.json() : null)
       ]);
 
       if (resLaminas && resLaminas.length > 0) setLaminas(resLaminas);
       if (resTubos && resTubos.length > 0) setTubos(resTubos);
-      if (resAcc && resAcc.length > 0) setAccesorios(resAcc);
+      if (resAcc && Array.isArray(resAcc)) {
+        setAccesorios(resAcc);
+        localStorage.setItem('m3_accesorios', JSON.stringify(resAcc));
+      }
       if (resPin && resPin.length > 0) setPinturas(resPin);
       if (resBrazos && resBrazos.length > 0) setBrazos(resBrazos);
       if (resBujes && resBujes.length > 0) setBujes(resBujes);
@@ -196,7 +235,6 @@ export default function App() {
       const nuevoState = {
         ...prev,
         categoria: categoriaSel,
-        // Limpiar de forma explícita selecciones de accesorios y bujes antiguos
         accesoriosSeleccionados: [],
         bujesSeleccionados: [],
         bujeInicialId: '',
@@ -205,10 +243,22 @@ export default function App() {
         bujePuntaId: '',
         bujeInicial: null,
         bujeFinal: null,
+        tipoBrazo: 'SIMPLE_L',
+        conPieDeAmigo: false,
+        longitudTravesanoT: 50,
+        tieneCaperuza: false,
+        caperuzaEmbellecedora: false,
+        caperuzaBase: false,
+        cubreAnclaje: false,
+        tieneVideoportero: false,
+        accesorioVideoportero: false,
+        videoporteroPunta: false,
+        soporteVideoportero: false,
+        accesorioPunta: '',
         detallesAccesorios: {},
         cantidadesAcc: {},
         tramos: esPosteOBrazo 
-          ? (prev.tramos?.length > 0 ? prev.tramos : [{ id: Date.now(), alto: 150, tuboId: '', forma: 'redondo' }])
+          ? (prev.tramos?.length > 0 ? prev.tramos : [{ id: Date.now(), alto: categoriaSel === 'brazos' ? 60 : 150, tuboId: '', forma: 'redondo' }])
           : []
       };
 
@@ -228,6 +278,8 @@ export default function App() {
     setItemsCotizacion([]);
     setClienteSeleccionado(null);
     setNotas('');
+    setVendedor(listaVendedores[0] || '');
+    setDisenador(listaDisenadores[0] || '');
     await obtenerSiguienteConsecutivo();
     setEditandoFormulario(true);
     setMensajeExito("Nueva cotización iniciada.");
@@ -240,11 +292,12 @@ export default function App() {
       lista = await cargarHistorial();
     }
 
+    const prefijoActual = consecutivo.replace(/\d+$/, '');
     const numActual = parseInt(consecutivo.replace(/\D/g, ''), 10);
     if (isNaN(numActual)) return;
 
     if (direccion === 'anterior') {
-      const objetivo = `COT-${numActual - 1}`;
+      const objetivo = `${prefijoActual}${numActual - 1}`;
       const encontrada = lista.find(c => c.consecutivo === objetivo);
       if (encontrada) {
         await handleCargarCotizacionExistente(encontrada.id);
@@ -253,7 +306,7 @@ export default function App() {
         setItemsCotizacion([]);
       }
     } else if (direccion === 'siguiente') {
-      const objetivo = `COT-${numActual + 1}`;
+      const objetivo = `${prefijoActual}${numActual + 1}`;
       const encontrada = lista.find(c => c.consecutivo === objetivo);
       if (encontrada) {
         await handleCargarCotizacionExistente(encontrada.id);
@@ -269,11 +322,12 @@ export default function App() {
     setErrorBackend(null);
   };
 
-const handleAgregarACotizacion = async (payload = {}) => {
+  const handleAgregarACotizacion = async (payload = {}) => {
     setCargandoCotizacion(true);
     setErrorBackend(null);
 
     const esGabinete = categoriaSel === 'gabinetes' || categoriaSel === 'totems';
+    const esBrazo = categoriaSel === 'brazos';
     const paramsUnificados = { ...params, ...payload };
     
     if (esGabinete) {
@@ -340,18 +394,39 @@ const handleAgregarACotizacion = async (payload = {}) => {
       console.warn("Servidor inalcanzable, calculando contingencia local:", error);
     }
 
+    // El distribuidor nunca calcula con costos de fábrica en el navegador: sin servidor no hay precio
+    if (!dataServidor && esDistribuidor) {
+      setErrorBackend("No se pudo calcular el precio del ítem. Verifica tu conexión e inténtalo de nuevo.");
+      setCargandoCotizacion(false);
+      return;
+    }
+
     // --- CÁLCULO DE RESPALDO (Por si el servidor falla o responde 500) ---
+    const desgloseLocalBrazo = esBrazo
+      ? calcularCostosBrazoParametrico(paramsParaBackend, tubos, bujes, nivelPrecio)
+      : null;
+
     let costoEstructuraLocal = 0;
-    if (tramosFiltrados.length > 0) {
+    if (esBrazo && desgloseLocalBrazo) {
+      costoEstructuraLocal = desgloseLocalBrazo.costoTubosVenta;
+    } else if (tramosFiltrados.length > 0) {
       tramosFiltrados.forEach(tramo => {
         const tuboObj = tubos.find(t => String(t.id) === String(tramo.tuboId));
-        const precioMetro = tuboObj ? Number(tuboObj.precio_metro || tuboObj.precio || 0) : 15000;
+        const precioMetro = tuboObj ? Number(tuboObj.precio_metro || (tuboObj.precio_tira_6m / 6) || tuboObj.precio || 0) : 15000;
         const metros = (Number(tramo.alto) || 0) / 100;
         costoEstructuraLocal += precioMetro * metros;
       });
     }
 
-    let costoAccesoriosLocal = 0;
+    let costoAccesoriosLocal = esBrazo && desgloseLocalBrazo
+      ? (
+          desgloseLocalBrazo.costoBujesYPlatinasTotal +
+          desgloseLocalBrazo.costoVarillaVenta +
+          desgloseLocalBrazo.costoSoldaduraVenta +
+          desgloseLocalBrazo.costoAdicionalesBrazo
+        )
+      : 0;
+
     accsValidos.forEach(accId => {
       const accObj = accesorios.find(a => String(a.id) === String(accId));
       const cant = paramsUnificados.cantidadesAcc?.[accId] || 1;
@@ -359,17 +434,120 @@ const handleAgregarACotizacion = async (payload = {}) => {
       costoAccesoriosLocal += precioAcc * cant;
     });
 
-    const costoPinturaLocal = 12000; // Valor base estimado de pintura
+    const costoPinturaLocal = 12000;
 
-    // Extraer valores finales (Servidor primero, si no existe usa el Respaldo Local)
-    const costoBaseReal = Number(dataServidor?.costo_base || dataServidor?.costo_tubos_venta || (costoEstructuraLocal > 0 ? costoEstructuraLocal : 25000));
+    // Normalizar accesoriosLista e inyectar Caperuza (+$25.000) y Videoportero (+$45.000) si están activos en Brazo
+    const tieneCaperuzaBrazo = esBrazo && Boolean(
+      paramsParaBackend.tieneCaperuza ??
+      paramsParaBackend.caperuzaEmbellecedora ??
+      paramsParaBackend.caperuzaBase ??
+      paramsParaBackend.cubreAnclaje ??
+      paramsParaBackend.caperuza
+    );
+    const tieneVideoporteroBrazo = esBrazo && Boolean(
+      paramsParaBackend.tieneVideoportero ??
+      paramsParaBackend.accesorioVideoportero ??
+      paramsParaBackend.videoporteroPunta ??
+      paramsParaBackend.soporteVideoportero ??
+      paramsParaBackend.accesorioPunta === 'videoportero'
+    );
+
+    let accesoriosListaFinal = Array.isArray(dataServidor?.accesorios_lista)
+      ? dataServidor.accesorios_lista.map(a => ({ ...a }))
+      : [];
+
+    if (esBrazo) {
+      // Si el servidor no devolvió lista (ej. modo offline), construir lista base con bujes seleccionados
+      if (accesoriosListaFinal.length === 0) {
+        if (paramsParaBackend.bujeInicial && paramsParaBackend.bujeInicial.precio) {
+          const pIni = Number(paramsParaBackend.bujeInicial.precio) || 0;
+          accesoriosListaFinal.push({
+            id: `buje_${paramsParaBackend.bujeInicial.id}`,
+            nombre: `Buje: ${paramsParaBackend.bujeInicial.nombre}`,
+            cantidad: 1,
+            precioUnitario: pIni,
+            precio: pIni,
+            total: pIni
+          });
+        }
+        if (paramsParaBackend.bujeFinal && paramsParaBackend.bujeFinal.precio) {
+          const cantFin = (paramsParaBackend.tipoBrazo === 'T' || paramsParaBackend.tipoBrazo === 'T_BILATERAL') ? 2 : 1;
+          const pFin = Number(paramsParaBackend.bujeFinal.precio) || 0;
+          accesoriosListaFinal.push({
+            id: `buje_${paramsParaBackend.bujeFinal.id}`,
+            nombre: `Buje: ${paramsParaBackend.bujeFinal.nombre}`,
+            cantidad: cantFin,
+            precioUnitario: pFin,
+            precio: pFin * cantFin,
+            total: pFin * cantFin
+          });
+        }
+      }
+
+      if (tieneCaperuzaBrazo) {
+        const idxCap = accesoriosListaFinal.findIndex(a => {
+          const txt = `${a.id || ''} ${a.nombre || ''}`.toLowerCase();
+          return txt.includes('caperuza') || txt.includes('cubre-anclaje') || txt.includes('cubre anclaje');
+        });
+        const itemCaperuza = {
+          id: 'caperuza_embellecedora',
+          nombre: 'Caperuza / Cubre-anclaje Embellecedora',
+          cantidad: 1,
+          precioUnitario: 25000,
+          precio: 25000,
+          total: 25000
+        };
+        // Si el servidor ya la calculó (con margen del distribuidor) se respeta su precio
+        if (idxCap < 0) {
+          accesoriosListaFinal.push(itemCaperuza);
+        }
+      }
+
+      if (tieneVideoporteroBrazo) {
+        const idxVid = accesoriosListaFinal.findIndex(a => {
+          const idStr = String(a.id || '').toLowerCase();
+          const nomStr = String(a.nombre || '').toLowerCase();
+          // Distinguir del buje final si el buje también se llama videoportero
+          const esBuje = idStr.startsWith('buje_') || nomStr.startsWith('buje:');
+          return !esBuje && (idStr.includes('videoportero') || nomStr.includes('videoportero') || nomStr.includes('portero'));
+        });
+        const itemVideoportero = {
+          id: 'accesorio_videoportero_punta',
+          nombre: 'Accesorio Videoportero en Punta de Brazo',
+          cantidad: 1,
+          precioUnitario: 45000,
+          precio: 45000,
+          total: 45000
+        };
+        if (idxVid < 0) {
+          accesoriosListaFinal.push(itemVideoportero);
+        }
+      }
+    }
+
+    const sumaListaAccFinal = accesoriosListaFinal.reduce((acc, a) => {
+      const cant = Number(a.cantidad || 1);
+      const unit = Number(a.precioUnitario ?? a.precio ?? a.total ?? 0);
+      return acc + (unit * cant);
+    }, 0);
+
+    const costoEstructuraReal = Number(
+      dataServidor?.costoEstructura ||
+      dataServidor?.costo_tubos_venta ||
+      dataServidor?.costo_base ||
+      (costoEstructuraLocal > 0 ? costoEstructuraLocal : 25000)
+    );
     const costoPinturaReal = Number(dataServidor?.costo_pintura_venta || dataServidor?.costo_pintura || costoPinturaLocal);
-    const costoAccReal = Number(dataServidor?.costo_accesorios_venta || dataServidor?.costo_accesorios || costoAccesoriosLocal);
-    const totalReal = Number(dataServidor?.precio_venta || dataServidor?.total || (costoBaseReal + costoPinturaReal + costoAccReal));
+    const costoAccReal = accesoriosListaFinal.length > 0
+      ? sumaListaAccFinal
+      : Number(dataServidor?.costo_accesorios_venta || dataServidor?.costo_accesorios || costoAccesoriosLocal);
+    const totalReal = Math.round(costoEstructuraReal + costoPinturaReal + costoAccReal);
 
     let materialNombre = 'Estructura Estándar';
     if (categoriaSel === 'postes' || categoriaSel === 'brazos') {
-      materialNombre = 'Estructura Postes Multi-Tramo';
+      materialNombre = esBrazo
+        ? `Soporte Brazo (${paramsParaBackend.tipoBrazo || 'SIMPLE_L'})`
+        : 'Estructura Postes Multi-Tramo';
     } else {
       const laminaObj = laminas.find(l => String(l.id) === String(paramsParaBackend.laminaId));
       if (laminaObj) {
@@ -381,14 +559,16 @@ const handleAgregarACotizacion = async (payload = {}) => {
       id: Date.now(),
       categoria: (categoriaSel || '').toUpperCase(),
       descripcion: `${materialNombre} - Pintura: ${paramsParaBackend.nombrePintura || 'Estándar'} (${dataServidor?.area_m2 || 1.5} m²)`,
+      medidas_texto: dataServidor?.medidas_texto || `${paramsParaBackend.alto || 60} cm`,
       lamina: materialNombre,
       laminaId: paramsParaBackend.laminaId,
       pintura: paramsParaBackend.nombrePintura || 'Estándar',
       colorPintura: paramsParaBackend.colorPintura || '#2563eb',
       
-      costoBase: costoBaseReal,
+      costoEstructura: costoEstructuraReal,
+      costoBase: costoEstructuraReal,
       costoPintura: costoPinturaReal,
-      costoTubos: costoBaseReal,
+      costoTubos: costoEstructuraReal,
       costoAccesorios: costoAccReal,
       total: totalReal,
       
@@ -402,9 +582,11 @@ const handleAgregarACotizacion = async (payload = {}) => {
       bujesSeleccionados: paramsParaBackend.bujesSeleccionados,
       detallesAccesorios: paramsParaBackend.detallesAccesorios,
       cantidadesAcc: paramsUnificados.cantidadesAcc,
-      accesoriosLista: dataServidor?.accesorios_lista || [],
-      params: { ...paramsParaBackend, categoria: (categoriaSel || '').toUpperCase() },
-      configuracion: { ...paramsParaBackend, categoria: (categoriaSel || '').toUpperCase() }
+      accesoriosLista: accesoriosListaFinal,
+      accesorios_lista: accesoriosListaFinal,
+      nivelPrecio,
+      params: { ...paramsParaBackend, categoria: (categoriaSel || '').toUpperCase(), nivelPrecio },
+      configuracion: { ...paramsParaBackend, categoria: (categoriaSel || '').toUpperCase(), nivelPrecio }
     };
 
     setItemsCotizacion(prev => [...prev, nuevoItem]);
@@ -452,11 +634,16 @@ const handleAgregarACotizacion = async (payload = {}) => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          id: cotizacionId,
           consecutivo: consecutivo,
           cliente_id: clienteSeleccionado?.id || null,
           clienteId: clienteSeleccionado?.id || null,
           clienteNombre: clienteSeleccionado?.nombre || 'Consumidor Final / Mostrador',
           clienteNit: clienteSeleccionado?.nit || null,
+          vendedor: vendedor,
+          asesor_nombre: vendedor,
+          disenador: disenador,
+          disenador_nombre: disenador,
           observaciones: notas || '',
           notas: notas || '',
           nivelPrecio: nivelPrecio,
@@ -468,10 +655,13 @@ const handleAgregarACotizacion = async (payload = {}) => {
       if (!res.ok) throw new Error("Error en la petición de guardado");
 
       const data = await res.json();
-      setMensajeExito(`Cotización ${data.consecutivo_guardado} guardada correctamente.`);
+      setMensajeExito(`Cotización ${data.consecutivo_guardado || data.consecutivo} guardada correctamente.`);
       
-      if (data.consecutivo_guardado) {
-        setConsecutivo(data.consecutivo_guardado);
+      if (data.id) {
+        setCotizacionId(data.id);
+      }
+      if (data.consecutivo_guardado || data.consecutivo) {
+        setConsecutivo(data.consecutivo_guardado || data.consecutivo);
       }
       cargarHistorial();
 
@@ -489,18 +679,19 @@ const handleAgregarACotizacion = async (payload = {}) => {
       if (!res.ok) throw new Error("No se pudo obtener el detalle");
       const data = await res.json();
       
+      setCotizacionId(data.id || id);
       setConsecutivo(data.consecutivo);
       setNivelPrecio(data.nivel_precio || 1);
       
       const itemsCargados = data.items || [];
       setItemsCotizacion(itemsCargados);
 
-      // Cargar observaciones
       setNotas(data.observaciones || '');
+      setVendedor(data.asesor_id || data.asesor_nombre || data.vendedor || listaVendedores[0] || '');
+      setDisenador(data.disenador_id || data.disenador_nombre || data.disenador || listaDisenadores[0] || '');
 
-      // Cargar cliente asignado
-      if (data.cliente_id || data.cliente_nombre) {
-        setClienteSeleccionado({
+      if (data.cliente || data.cliente_id || data.cliente_nombre) {
+        setClienteSeleccionado(data.cliente || {
           id: data.cliente_id || null,
           nombre: data.cliente_nombre || 'Consumidor Final / Mostrador',
           nit: data.cliente_nit || '',
@@ -568,8 +759,15 @@ const handleAgregarACotizacion = async (payload = {}) => {
     <div className="w-screen h-screen bg-slate-100 text-slate-800 flex flex-col overflow-hidden m-0 p-0 font-sans">
       <header className="bg-white border-b border-slate-300 px-4 py-2 flex justify-between items-center w-full shrink-0 h-14 shadow-sm">
         <div className="flex items-center gap-3">
-          <div className="bg-blue-600 font-black text-white px-3 py-1 rounded-lg shadow-sm">M3</div>
-          <h1 className="text-base font-bold text-slate-900 hidden md:block">Plataforma Integrada M3</h1>
+          <img
+            src={(esDistribuidor && perfil?.logo_url) ? perfil.logo_url : '/logo.png'}
+            alt={esDistribuidor ? (perfil?.nombre_comercial || 'Logo') : 'WG Ingeniería'}
+            className="h-9 max-w-[150px] object-contain"
+            onError={(e) => { if (!e.currentTarget.src.endsWith('/logo.png') && !esDistribuidor) e.currentTarget.style.display = 'none'; }}
+          />
+          <h1 className="text-base font-bold text-slate-900 hidden md:block truncate max-w-[220px]">
+            {esDistribuidor ? (perfil?.nombre_comercial || 'Mi Empresa') : 'Plataforma Integrada M3'}
+          </h1>
         </div>
 
         <div className="flex items-center gap-2">
@@ -613,11 +811,38 @@ const handleAgregarACotizacion = async (payload = {}) => {
         </div>
 
         <nav className="flex bg-slate-100 p-1 rounded-xl border border-slate-300 gap-1 text-xs">
-          <button onClick={() => setTabActual('cotizador')} className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 font-semibold transition ${tabActual === 'cotizador' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'}`}><Calculator size={14}/> Cotizador</button>
+          <button 
+            onClick={() => { setTabActual('cotizador'); cargarDatosServidor(); }} 
+            className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 font-semibold transition ${tabActual === 'cotizador' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'}`}
+          >
+            <Calculator size={14}/> Cotizador
+          </button>
           <button onClick={() => setTabActual('historial')} className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 font-semibold transition ${tabActual === 'historial' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'}`}><History size={14}/> Historial</button>
           <button onClick={() => setTabActual('galeria')} className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 font-semibold transition ${tabActual === 'galeria' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'}`}><Eye size={14}/> 3D</button>
-          <button onClick={() => setTabActual('admin')} className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 font-semibold transition ${tabActual === 'admin' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'}`}><Settings size={14}/> Admin</button>
+          {esSuperAdmin && (
+            <button onClick={() => setTabActual('admin')} className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 font-semibold transition ${tabActual === 'admin' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'}`}><Settings size={14}/> Admin</button>
+          )}
         </nav>
+
+        <div className="flex items-center gap-2 text-xs">
+          {esDistribuidor && (
+            <button
+              onClick={() => setModalPerfil(true)}
+              className="bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 font-semibold px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 transition"
+              title="Mi Perfil / Mi Empresa"
+            >
+              <UserCog size={15} /> <span className="hidden lg:inline">Mi Empresa</span>
+            </button>
+          )}
+          <span className="hidden xl:inline text-slate-500 font-medium" title={user?.rol}>{user?.username}</span>
+          <button
+            onClick={logout}
+            className="text-slate-500 hover:text-red-600 p-1.5 rounded-lg hover:bg-slate-100 transition"
+            title="Cerrar sesión"
+          >
+            <LogOut size={16} />
+          </button>
+        </div>
       </header>
 
       {errorBackend && (
@@ -663,12 +888,23 @@ const handleAgregarACotizacion = async (payload = {}) => {
                   setItems={setItemsCotizacion} 
                   consecutivo={consecutivo}
                   setConsecutivo={setConsecutivo}
+                  cotizacionId={cotizacionId}
+                  setCotizacionId={setCotizacionId}
+                  accesorios={accesorios}
                   visorRef={visorRef}
                   clienteSeleccionado={clienteSeleccionado}
                   setClienteSeleccionado={setClienteSeleccionado}
                   notas={notas}
                   setNotas={setNotas}
+                  vendedor={vendedor}
+                  setVendedor={setVendedor}
+                  disenador={disenador}
+                  setDisenador={setDisenador}
                   API_BASE_URL={API_BASE_URL}
+                  nivelPrecio={nivelPrecio}
+                  listaVendedores={listaVendedores}
+                  listaDisenadores={listaDisenadores}
+                  membrete={membretePdf}
                   onGuardarCotizacion={handleGuardarCotizacionBD}
                 />
               </div>
@@ -703,7 +939,7 @@ const handleAgregarACotizacion = async (payload = {}) => {
         )}
 
         {tabActual === 'galeria' && <Galeria />}
-        {tabActual === 'admin' && (
+        {tabActual === 'admin' && esSuperAdmin && (
           <PanelAdmin 
             API_BASE_URL={API_BASE_URL}
             recargarDatos={cargarDatosServidor}
@@ -717,6 +953,8 @@ const handleAgregarACotizacion = async (payload = {}) => {
           />
         )}
       </main>
+
+      {modalPerfil && esDistribuidor && <ModalMiPerfil onClose={() => setModalPerfil(false)} />}
     </div>
   );
 }

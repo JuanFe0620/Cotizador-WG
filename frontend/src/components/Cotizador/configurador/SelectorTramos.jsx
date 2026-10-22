@@ -28,6 +28,22 @@ export default function SelectorTramos({
 }) {
   const tramos = params.tramos || [];
   const esBrazo = categoriaSel === 'brazos' || params.categoria === 'brazos';
+  const esBrazoEnT = esBrazo && (params.tipoBrazo === 'T' || params.tipoBrazo === 'T_BILATERAL');
+  const conPieDeAmigo = Boolean(params.conPieDeAmigo);
+
+  const obtenerTubosFiltrados = (formaTramo) => {
+    const formaBuscada = (formaTramo || 'redondo').toLowerCase();
+
+    return tubos.filter(t => {
+      const formaTubo = (t.forma || '').toLowerCase();
+      const coincideForma = formaBuscada === 'cuadrado'
+        ? (formaTubo === 'cuadrado' || formaTubo === 'rectangular')
+        : formaTubo === formaBuscada;
+      const perteneceCategoria = !categoriaSel || (t.categorias && t.categorias.includes(categoriaSel));
+
+      return coincideForma && perteneceCategoria;
+    });
+  };
 
   const actualizarTramo = (id, campo, valor) => {
     setParams(prev => {
@@ -43,6 +59,42 @@ export default function SelectorTramos({
           
           if (campo === 'angulo') {
             tramoActualizado.angulo = valor === '' ? 0 : Number(valor);
+          }
+
+          if (campo === 'forma') {
+            const nuevaForma = String(valor || 'redondo').toLowerCase();
+            tramoActualizado.forma = nuevaForma;
+            tramoActualizado.tipo = nuevaForma;
+            tramoActualizado.tipoPerfil = nuevaForma;
+            tramoActualizado.seccion = nuevaForma;
+
+            const opcionesForma = obtenerTubosFiltrados(nuevaForma);
+            const tuboActual = opcionesForma.find(tb => String(tb.id) === String(t.tuboId));
+            const tuboRef = tuboActual || opcionesForma[0] || null;
+
+            if (tuboRef) {
+              const diametroPulg = parseFloat(tuboRef.diametro_pulg || tuboRef.diametro || 2.0);
+              const anchoCm = parseFloat(tuboRef.ancho_cm || 4.0);
+              const altoCm = parseFloat(tuboRef.alto_cm || anchoCm || 4.0);
+              tramoActualizado.tuboId = tuboRef.id;
+              tramoActualizado.diametro = diametroPulg;
+              tramoActualizado.diametro_pulg = diametroPulg;
+              tramoActualizado.ancho_cm = anchoCm;
+              tramoActualizado.alto_cm = altoCm;
+              tramoActualizado.calibre = tuboRef.calibre || '';
+              tramoActualizado.tuboNombre = `${tuboRef.material || ''} ${tuboRef.calibre || ''} ${
+                nuevaForma === 'cuadrado' ? `${anchoCm}x${altoCm} cm` : `${diametroPulg}"`
+              }`.trim();
+            } else {
+              tramoActualizado.tuboId = '';
+              if (nuevaForma === 'cuadrado') {
+                tramoActualizado.ancho_cm = parseFloat(t.ancho_cm) || 4.0;
+                tramoActualizado.alto_cm = parseFloat(t.alto_cm) || 4.0;
+              } else {
+                tramoActualizado.diametro = parseFloat(t.diametro_pulg || t.diametro) || 2.0;
+                tramoActualizado.diametro_pulg = parseFloat(t.diametro_pulg || t.diametro) || 2.0;
+              }
+            }
           }
 
           return tramoActualizado;
@@ -63,18 +115,26 @@ export default function SelectorTramos({
             return { ...t, tuboId: '' };
           }
 
+          const formaReal = (tuboObj.forma || t.forma || 'redondo').toLowerCase();
           const diametroPulg = parseFloat(tuboObj.diametro_pulg || tuboObj.diametro || 2.0);
           const anchoCm = parseFloat(tuboObj.ancho_cm || 4.0);
-          const altoCm = parseFloat(tuboObj.alto_cm || 4.0);
+          const altoCm = parseFloat(tuboObj.alto_cm || anchoCm || 4.0);
 
           return {
             ...t,
             tuboId: tuboObj.id,
+            forma: formaReal,
+            tipo: formaReal,
+            tipoPerfil: formaReal,
+            seccion: formaReal,
             diametro: diametroPulg,
             diametro_pulg: diametroPulg,
             ancho_cm: anchoCm,
             alto_cm: altoCm,
-            tipo: tuboObj.forma || t.forma || 'redondo'
+            calibre: tuboObj.calibre || t.calibre || '',
+            tuboNombre: `${tuboObj.material || ''} ${tuboObj.calibre || ''} ${
+              formaReal === 'cuadrado' ? `${anchoCm}x${altoCm} cm` : `${diametroPulg}"`
+            }`.trim()
           };
         }
         return t;
@@ -84,14 +144,21 @@ export default function SelectorTramos({
   };
 
   const agregarTramo = () => {
+    const ultimoTramo = tramos[tramos.length - 1] || tramos[0] || {};
+    const formaHeredada = ultimoTramo.forma || ultimoTramo.tipo || 'redondo';
     const nuevo = {
       id: Date.now(),
       alto: 40,
       longitud: 40,
       angulo: 0,
-      tuboId: tramos[0]?.tuboId || '',
-      forma: 'redondo',
-      diametro_pulg: 2.0
+      tuboId: ultimoTramo.tuboId || '',
+      forma: formaHeredada,
+      tipo: formaHeredada,
+      tipoPerfil: formaHeredada,
+      diametro: ultimoTramo.diametro ?? 2.0,
+      diametro_pulg: ultimoTramo.diametro_pulg ?? 2.0,
+      ancho_cm: ultimoTramo.ancho_cm ?? 4.0,
+      alto_cm: ultimoTramo.alto_cm ?? 4.0
     };
     setParams(prev => ({ ...prev, tramos: [...(prev.tramos || []), nuevo] }));
   };
@@ -104,50 +171,125 @@ export default function SelectorTramos({
     }));
   };
 
-  const obtenerTubosFiltrados = (formaTramo) => {
-    const formaBuscada = (formaTramo || 'redondo').toLowerCase();
-
-    return tubos.filter(t => {
-      const formaTubo = (t.forma || '').toLowerCase();
-      const coincideForma = formaTubo === formaBuscada;
-      const perteneceCategoria = !categoriaSel || (t.categorias && t.categorias.includes(categoriaSel));
-
-      return coincideForma && perteneceCategoria;
-    });
-  };
-
   return (
     <div className="space-y-4">
-      {/* UBICACIÓN DEL BRAZO */}
+      {/* UBICACIÓN Y TIPO DEL BRAZO */}
       {esBrazo && (
-        <div className="bg-slate-100 p-3 rounded-xl border border-slate-200 space-y-2">
-          <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block">
-            Ubicación del Brazo
-          </label>
-          <div className="grid grid-cols-2 gap-2 text-xs font-medium">
-            <button
-              type="button"
-              onClick={() => setParams(prev => ({ ...prev, orientacion: 'suspendido' }))}
-              className={`p-2 rounded-lg border text-center transition ${
-                params.orientacion !== 'suelo'
-                  ? 'bg-blue-600 text-white border-blue-600 font-semibold shadow-sm'
-                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-              }`}
-            >
-              Suspendido (Pared/Poste)
-            </button>
-            <button
-              type="button"
-              onClick={() => setParams(prev => ({ ...prev, orientacion: 'suelo' }))}
-              className={`p-2 rounded-lg border text-center transition ${
-                params.orientacion === 'suelo'
-                  ? 'bg-blue-600 text-white border-blue-600 font-semibold shadow-sm'
-                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-              }`}
-            >
-              Sobre el Suelo
-            </button>
+        <div className="bg-slate-100 p-3 rounded-xl border border-slate-200 space-y-3">
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block">
+              Ubicación del Brazo
+            </label>
+            <div className="grid grid-cols-2 gap-2 text-xs font-medium">
+              <button
+                type="button"
+                onClick={() => setParams(prev => ({ ...prev, orientacion: 'suspendido' }))}
+                className={`p-2 rounded-lg border text-center transition ${
+                  params.orientacion !== 'suelo'
+                    ? 'bg-blue-600 text-white border-blue-600 font-semibold shadow-sm'
+                    : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                }`}
+              >
+                Suspendido (Pared/Poste)
+              </button>
+              <button
+                type="button"
+                onClick={() => setParams(prev => ({ ...prev, orientacion: 'suelo' }))}
+                className={`p-2 rounded-lg border text-center transition ${
+                  params.orientacion === 'suelo'
+                    ? 'bg-blue-600 text-white border-blue-600 font-semibold shadow-sm'
+                    : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                }`}
+              >
+                Sobre el Suelo
+              </button>
+            </div>
           </div>
+
+          {/* Selector de Tipo de Brazo: Simple / En L vs Brazo en T */}
+          <div className="pt-2 border-t border-slate-200/80 space-y-1.5">
+            <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block">
+              Tipo de Brazo
+            </label>
+            <div className="grid grid-cols-2 gap-2 text-xs font-medium">
+              <button
+                type="button"
+                onClick={() => setParams(prev => ({ ...prev, tipoBrazo: 'SIMPLE_L' }))}
+                className={`p-2 rounded-lg border text-center transition ${
+                  !esBrazoEnT
+                    ? 'bg-blue-600 text-white border-blue-600 font-semibold shadow-sm'
+                    : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                }`}
+              >
+                Simple / En L
+              </button>
+              <button
+                type="button"
+                onClick={() => setParams(prev => ({
+                  ...prev,
+                  tipoBrazo: 'T',
+                  longitudTravesanoT: prev.longitudTravesanoT || 50
+                }))}
+                className={`p-2 rounded-lg border text-center transition ${
+                  esBrazoEnT
+                    ? 'bg-blue-600 text-white border-blue-600 font-semibold shadow-sm'
+                    : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                }`}
+              >
+                Brazo en T (Doble Cámara)
+              </button>
+            </div>
+          </div>
+
+          {/* Ancho del Travesaño cuando está en modo Brazo en T */}
+          {esBrazoEnT && (
+            <div className="bg-white p-2.5 rounded-lg border border-slate-200 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] font-semibold text-slate-600">
+                  Ancho del Travesaño en T (cm):
+                </label>
+                <input
+                  type="number"
+                  min="20"
+                  max="180"
+                  value={params.longitudTravesanoT ?? 50}
+                  onChange={e => setParams(prev => ({
+                    ...prev,
+                    longitudTravesanoT: e.target.value === '' ? '' : Number(e.target.value)
+                  }))}
+                  className="w-20 text-right bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-slate-800 font-mono text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <input
+                type="range"
+                min="20"
+                max="150"
+                step="5"
+                value={params.longitudTravesanoT ?? 50}
+                onChange={e => setParams(prev => ({
+                  ...prev,
+                  longitudTravesanoT: Number(e.target.value)
+                }))}
+                className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+              />
+            </div>
+          )}
+
+          {/* Switch / Checkbox simple para Pie de Amigo */}
+          <label className="flex items-center gap-2 cursor-pointer select-none bg-white p-2.5 rounded-lg border border-slate-200 hover:border-slate-300 transition">
+            <input
+              type="checkbox"
+              checked={conPieDeAmigo}
+              onChange={e => setParams(prev => ({
+                ...prev,
+                conPieDeAmigo: e.target.checked
+              }))}
+              className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-0"
+            />
+            <span className="text-[11px] font-bold text-slate-700">
+              Incluir Pie de Amigo (Varilla de Refuerzo)
+            </span>
+          </label>
         </div>
       )}
 

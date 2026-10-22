@@ -11,11 +11,16 @@ function limpiarTexto(val) {
   return str.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
 }
 
-function construirPlatinaBaseProcedural(esCuadrada, radioTuboM, materialTubo) {
+function construirPlatinaBaseProcedural(esCuadrada, radioTuboM, materialTubo, perfilTubo = null) {
   const grupo = new THREE.Group();
   grupo.name = esCuadrada ? 'PlatinaCuadradaBase' : 'PlatinaRedondaBase';
 
-  const ladoM = Math.max(radioTuboM * 5.2, 0.20);
+  const esTuboPrismatico = Boolean(perfilTubo?.esPrismatico);
+  const anchoTuboM = perfilTubo?.anchoM || radioTuboM * 2;
+  const profTuboM = perfilTubo?.profundidadM || radioTuboM * 2;
+  const radioRefM = Math.max(radioTuboM, anchoTuboM / 2, profTuboM / 2);
+
+  const ladoM = Math.max(radioRefM * 5.2, 0.20);
   const medioLado = ladoM / 2;
   const espesorM = 0.008;
 
@@ -35,9 +40,19 @@ function construirPlatinaBaseProcedural(esCuadrada, radioTuboM, materialTubo) {
     shape.absarc(0, 0, medioLado, 0, Math.PI * 2, false);
   }
 
-  // Agujero central para paso del tubo/cableado
+  // Agujero central para paso del tubo/cableado adaptado a la sección del perfil
   const agujeroCentral = new THREE.Path();
-  agujeroCentral.absarc(0, 0, radioTuboM * 0.75, 0, Math.PI * 2, true);
+  if (esTuboPrismatico) {
+    const hx = (anchoTuboM * 0.75) / 2;
+    const hz = (profTuboM * 0.75) / 2;
+    agujeroCentral.moveTo(-hx, -hz);
+    agujeroCentral.lineTo(hx, -hz);
+    agujeroCentral.lineTo(hx, hz);
+    agujeroCentral.lineTo(-hx, hz);
+    agujeroCentral.closePath();
+  } else {
+    agujeroCentral.absarc(0, 0, radioTuboM * 0.75, 0, Math.PI * 2, true);
+  }
   shape.holes.push(agujeroCentral);
 
   // 4 orificios para pernos de anclaje
@@ -75,6 +90,14 @@ function construirPlatinaBaseProcedural(esCuadrada, radioTuboM, materialTubo) {
   mesh.receiveShadow = true;
   grupo.add(mesh);
 
+  // Collarín de refuerzo en el encuentro con el tubo (cuadrado/rectangular o circular)
+  const collarinGeo = esTuboPrismatico
+    ? new THREE.BoxGeometry(anchoTuboM + 0.008, 0.006, profTuboM + 0.008)
+    : new THREE.CylinderGeometry(radioTuboM + 0.004, radioTuboM + 0.004, 0.006, 32);
+  const collarinMesh = new THREE.Mesh(collarinGeo, materialTubo);
+  collarinMesh.position.set(0, espesorM + 0.003, 0);
+  grupo.add(collarinMesh);
+
   // Pernos de anclaje
   const matPerno = new THREE.MeshStandardMaterial({
     color: 0x334155,
@@ -91,9 +114,13 @@ function construirPlatinaBaseProcedural(esCuadrada, radioTuboM, materialTubo) {
   return grupo;
 }
 
-function construirVideoporteroPunta(radioTuboM, materialTubo) {
+function construirVideoporteroPunta(radioTuboM, materialTubo, perfilTubo = null) {
   const grupo = new THREE.Group();
   grupo.name = 'AccesorioVideoporteroPunta';
+
+  const esTuboPrismatico = Boolean(perfilTubo?.esPrismatico);
+  const anchoTuboM = perfilTubo?.anchoM || radioTuboM * 2;
+  const profTuboM = perfilTubo?.profundidadM || radioTuboM * 2;
 
   const matMarco = new THREE.MeshStandardMaterial({
     color: 0x94a3b8,
@@ -117,8 +144,8 @@ function construirVideoporteroPunta(radioTuboM, materialTubo) {
   });
 
   // 1. Platina final soldada en la punta del tubo (sirve de respaldo estructural)
-  const anchoPlatinaM = 0.15;
-  const altoPlatinaM = 0.22;
+  const anchoPlatinaM = Math.max(0.15, anchoTuboM + 0.04);
+  const altoPlatinaM = Math.max(0.22, profTuboM + 0.06);
   const espesorPlatinaM = 0.008; // 8 mm de lámina estructural
 
   // La platina se ubica con su respaldo en Z = 0 (punto exacto de acople del tubo)
@@ -129,8 +156,10 @@ function construirVideoporteroPunta(radioTuboM, materialTubo) {
   platinaFinal.receiveShadow = true;
   grupo.add(platinaFinal);
 
-  // Cordón de soldadura perimetral entre el tubo y el respaldo de la platina (en Z = 0)
-  const soldaduraGeo = new THREE.TorusGeometry(radioTuboM, 0.0035, 12, 32);
+  // Cordón de soldadura perimetral entre el tubo y el respaldo de la platina (en Z = 0) adaptado a la sección
+  const soldaduraGeo = esTuboPrismatico
+    ? new THREE.BoxGeometry(anchoTuboM + 0.007, profTuboM + 0.007, 0.006)
+    : new THREE.TorusGeometry(radioTuboM, 0.0035, 12, 32);
   const soldaduraMesh = new THREE.Mesh(soldaduraGeo, materialTubo);
   soldaduraMesh.position.set(0, 0, 0);
   grupo.add(soldaduraMesh);
@@ -153,7 +182,6 @@ function construirVideoporteroPunta(radioTuboM, materialTubo) {
   });
 
   // 2. Caja del videoportero: montada DIRECTAMENTE sobre la cara frontal de la platina (Z = espesorPlatinaM)
-  // Estrictamente PARALELO a la platina (rotation = 0 en todos los ejes)
   const anchoCaja = 0.13;
   const altoCaja = 0.20;
   const profCaja = 0.045; // 4.5 cm de perfil
@@ -168,7 +196,7 @@ function construirVideoporteroPunta(radioTuboM, materialTubo) {
   cajaMesh.receiveShadow = true;
   grupo.add(cajaMesh);
 
-  // Visera protectora cortagotas superior (plana y paralela al borde superior)
+  // Visera protectora cortagotas superior
   const viseraGeo = new THREE.BoxGeometry(anchoCaja + 0.014, 0.005, profCaja + 0.025);
   const viseraMesh = new THREE.Mesh(viseraGeo, matMarco);
   viseraMesh.position.set(0, altoCaja / 2 + 0.0025, zFrentePlatina + (profCaja + 0.025) / 2);
@@ -225,14 +253,15 @@ function construirVideoporteroPunta(radioTuboM, materialTubo) {
 }
 
 export function renderizarBujeOBase(
-  loader, 
-  valBuje, 
-  punto, 
-  direccion, 
-  materialTubo, 
-  grupoBrazo, 
+  loader,
+  valBuje,
+  punto,
+  direccion,
+  materialTubo,
+  grupoBrazo,
   esFinal = false,
-  radioTuboM = 0.0254
+  radioTuboM = 0.0254,
+  perfilTubo = null
 ) {
   if (!valBuje) return;
 
@@ -241,7 +270,10 @@ export function renderizarBujeOBase(
     return;
   }
 
-  console.log(`🔍 [LOG BUJE] Evaluando valBuje (${esFinal ? 'FINAL' : 'INICIAL'}):`, `"${str}"`);
+  const esTuboPrismatico = Boolean(perfilTubo?.esPrismatico);
+  const anchoTuboM = perfilTubo?.anchoM || radioTuboM * 2;
+  const profTuboM = perfilTubo?.profundidadM || radioTuboM * 2;
+  const mitadProfundidadM = esTuboPrismatico ? profTuboM / 2 : radioTuboM;
 
   // Casos especiales procedurales (Platinas base redonda/cuadrada y Videoportero en punta)
   const esPlatinaRedonda = str.includes('platina redonda') || str.includes('base redonda') || str === 'platina_redonda';
@@ -253,10 +285,6 @@ export function renderizarBujeOBase(
     grupoContenedor.position.copy(punto);
 
     if (esVideoportero) {
-      // Orientar de modo que:
-      // - El respaldo de la platina (Z = 0) coincide exactamente con la punta del tubo (punto)
-      // - El vector normal hacia el frente de la platina y del videoportero sigue la dirección del tubo (vForward)
-      // - La orientación vertical (Y local) apunta hacia arriba en el mundo (vRealUp)
       const vForward = direccion.clone().normalize();
       let vUp = new THREE.Vector3(0, 1, 0);
       if (Math.abs(vForward.dot(vUp)) > 0.92) {
@@ -269,22 +297,24 @@ export function renderizarBujeOBase(
       const cuaternionAlineacion = new THREE.Quaternion().setFromRotationMatrix(matrizRotacion);
       grupoContenedor.quaternion.copy(cuaternionAlineacion);
 
-      grupoContenedor.add(construirVideoporteroPunta(radioTuboM, materialTubo));
+      grupoContenedor.add(construirVideoporteroPunta(radioTuboM, materialTubo, perfilTubo));
       grupoBrazo.add(grupoContenedor);
       return;
     }
 
     const dirNorm = direccion.clone().normalize();
-    const cuaternionAlineacion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dirNorm);
+    const cuaternionAlineacion = dirNorm.y < -0.9999
+      ? new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI)
+      : new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dirNorm);
     grupoContenedor.quaternion.copy(cuaternionAlineacion);
     grupoBrazo.add(grupoContenedor);
 
     if (esPlatinaRedonda) {
-      grupoContenedor.add(construirPlatinaBaseProcedural(false, radioTuboM, materialTubo));
+      grupoContenedor.add(construirPlatinaBaseProcedural(false, radioTuboM, materialTubo, perfilTubo));
       return;
     }
     if (esPlatinaCuadrada) {
-      grupoContenedor.add(construirPlatinaBaseProcedural(true, radioTuboM, materialTubo));
+      grupoContenedor.add(construirPlatinaBaseProcedural(true, radioTuboM, materialTubo, perfilTubo));
       return;
     }
   }
@@ -295,7 +325,7 @@ export function renderizarBujeOBase(
   let esPuntaBase = false;
   let esPuntaExtensible = false;
 
-  // MAPEO DE RUTAS SEGÚN PALABRAS CLAVE O IDS DE LA BASE DE DATOS (seed.py)
+  // MAPEO DE RUTAS SEGÚN PALABRAS CLAVE O IDS DE LA BASE DE DATOS
   if (str === '4' || str === 'buje_4' || str.includes('platina') || str.includes('15x10') || str.includes('rectangular') || str.includes('perforada')) {
     rutaGLB = '/models/Base15x10.glb';
     esBase15x10 = true;
@@ -312,28 +342,25 @@ export function renderizarBujeOBase(
     esPuntaExtensible = true;
   } else {
     rutaGLB = esFinal ? '/models/PuntaRoseta.glb' : '/models/BaseParedBuje.glb';
-    console.warn(`⚠️ No se identificó clave en "${str}". Se intentará cargar por defecto: ${rutaGLB}`);
   }
 
-  if (!loader) {
-    console.error('❌ Error: No se proporcionó el GLTFLoader a renderizarBujeOBase.');
-    return;
-  }
+  if (!loader) return;
 
   // CONTENEDOR 3D PARA EL MODELO GLB
   const grupoContenedor = new THREE.Group();
 
   if (!esFinal && esPlacaBase) {
-    grupoContenedor.position.set(punto.x, punto.y, punto.z - radioTuboM);
+    grupoContenedor.position.set(punto.x, punto.y, punto.z - mitadProfundidadM);
   } else {
     grupoContenedor.position.copy(punto);
   }
 
   // ALINEACIÓN Y ORIENTACIÓN
   const dirNorm = direccion.clone().normalize();
-  const cuaternionAlineacion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dirNorm);
+  const cuaternionAlineacion = dirNorm.y < -0.9999
+    ? new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI)
+    : new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dirNorm);
 
-  // Rotar PuntaBase.glb 180°
   const debeInvertir = esPuntaBase ? !esFinal : esFinal;
 
   if (debeInvertir) {
@@ -351,26 +378,26 @@ export function renderizarBujeOBase(
     (gltf) => {
       const model = gltf.scene;
 
-      // Escala dinámica proporcional al tubo
-      const diametroModeloOriginalM = 1.5 * 0.0254; // 1.5 pulgadas
-      const diametroTuboM = radioTuboM * 2;
-      const factorEscala = (diametroTuboM / diametroModeloOriginalM);
-      model.scale.set(factorEscala, factorEscala, factorEscala);
+      // Escala dinámica proporcional a las dimensiones reales del perfil del tubo (redondo o cuadrado/rectangular)
+      const diametroModeloOriginalM = 1.5 * 0.0254; // 1.5 pulgadas de referencia
+      const escalaX = anchoTuboM / diametroModeloOriginalM;
+      const escalaZ = profTuboM / diametroModeloOriginalM;
+      const escalaY = Math.max(escalaX, escalaZ);
+      model.scale.set(escalaX, escalaY, escalaZ);
 
-      // CASO 1: Platina 15x10 (Placa plana con apoyo desfasado al radio del tubo)
+      // CASO 1: Platina 15x10 (Placa plana con apoyo desfasado a la mitad del espesor/radio del tubo)
       if (esBase15x10 || rutaGLB.includes('Base15x10.glb')) {
         model.rotation.y += Math.PI;
 
         const box = new THREE.Box3().setFromObject(model);
         const center = box.getCenter(new THREE.Vector3());
-        model.position.set(-center.x, -box.min.y, -center.z - radioTuboM);
+        model.position.set(-center.x, -box.min.y, -center.z - mitadProfundidadM);
       }
 
-      // CASO 2: Punta Extensible / Buje PTZ (Cilíndrico concéntrico al centro del tubo)
+      // CASO 2: Punta Extensible / Buje PTZ (Concéntrico al centro del tubo)
       if (esPuntaExtensible || rutaGLB.includes('Puntaextensible.glb')) {
         const box = new THREE.Box3().setFromObject(model);
         const center = box.getCenter(new THREE.Vector3());
-        // Alineación concéntrica exacta en X y Z, apoyado en el extremo en Y
         model.position.set(-center.x, -box.min.y, -center.z);
       }
 
@@ -383,7 +410,6 @@ export function renderizarBujeOBase(
       });
 
       grupoContenedor.add(model);
-      console.log(`✅ Cargar con éxito GLB: ${rutaGLB}`);
     },
     undefined,
     (err) => console.error(`❌ Error al cargar el archivo GLB en ${rutaGLB}:`, err)

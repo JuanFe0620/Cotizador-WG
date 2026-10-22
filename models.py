@@ -1,18 +1,77 @@
-from sqlalchemy import Column, Integer, String, Float, Boolean, ForeignKey, DateTime, Text
+from sqlalchemy import Column, Integer, String, Float, Boolean, ForeignKey, DateTime, Text, UniqueConstraint, Index, CheckConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from database import Base
 
-class Cliente(Base):
-    __tablename__ = "clientes"
+class Distribuidor(Base):
+    """Distribuidor (marca blanca). La fábrica es un distribuidor con es_fabrica=True."""
+    __tablename__ = "distribuidores"
 
     id = Column(Integer, primary_key=True, index=True)
-    nit = Column(String, unique=True, index=True, nullable=False)
+    nombre_comercial = Column(String, nullable=False)
+    nit = Column(String, nullable=True)
+    telefono = Column(String, nullable=True)
+    direccion = Column(String, nullable=True)
+    correo = Column(String, nullable=True)
+    logo_url = Column(Text, nullable=True)  # URL, ruta local o data-URI base64
+    margen_comercial_default = Column(Float, nullable=False, default=0.0)  # % sobre costo de maquila
+    prefijo_consecutivo = Column(String, nullable=False, default="COT-")
+    ultimo_numero_consecutivo = Column(Integer, nullable=False, default=1000)
+    es_fabrica = Column(Boolean, nullable=False, default=False)
+    activo = Column(Boolean, nullable=False, default=False)  # False hasta aprobación del SuperAdmin
+    fecha_creacion = Column(DateTime, default=datetime.utcnow)
+
+    usuarios = relationship("Usuario", back_populates="distribuidor")
+    personal = relationship("PersonalDistribuidor", back_populates="distribuidor",
+                            cascade="all, delete-orphan")
+
+
+class Usuario(Base):
+    __tablename__ = "usuarios"
+    __table_args__ = (
+        CheckConstraint("rol IN ('SUPERADMIN', 'DISTRIBUIDOR')", name="ck_usuarios_rol"),
+        # Un usuario DISTRIBUIDOR siempre pertenece a un distribuidor.
+        CheckConstraint("rol = 'SUPERADMIN' OR distribuidor_id IS NOT NULL", name="ck_usuarios_distribuidor"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    distribuidor_id = Column(Integer, ForeignKey("distribuidores.id"), nullable=True, index=True)
+    username = Column(String, unique=True, index=True, nullable=False)
+    password_hash = Column(String, nullable=False)
+    rol = Column(String, nullable=False, default="DISTRIBUIDOR")  # SUPERADMIN | DISTRIBUIDOR
+    activo = Column(Boolean, nullable=False, default=True)
+
+    distribuidor = relationship("Distribuidor", back_populates="usuarios")
+
+
+class PersonalDistribuidor(Base):
+    """Asesores (vendedores) y diseñadores propios de cada distribuidor."""
+    __tablename__ = "personal_distribuidor"
+    __table_args__ = (
+        CheckConstraint("tipo IN ('ASESOR', 'DISENADOR')", name="ck_personal_tipo"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    distribuidor_id = Column(Integer, ForeignKey("distribuidores.id"), nullable=False, index=True)
+    tipo = Column(String, nullable=False)  # ASESOR | DISENADOR
+    nombre = Column(String, nullable=False)
+
+    distribuidor = relationship("Distribuidor", back_populates="personal")
+
+
+class Cliente(Base):
+    __tablename__ = "clientes"
+    __table_args__ = (
+        UniqueConstraint("distribuidor_id", "nit", name="uq_cliente_distribuidor_nit"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    distribuidor_id = Column(Integer, ForeignKey("distribuidores.id"), nullable=True, index=True)
+    nit = Column(String, index=True, nullable=False)
     nombre = Column(String, nullable=False)
     direccion = Column(String, nullable=True)
     telefono = Column(String, nullable=True)
     email = Column(String, nullable=True)
-
 
 class Tubo(Base):
     __tablename__ = "tubos"
@@ -123,13 +182,19 @@ class BrazoGuardado(Base):
 
 class Cotizacion(Base):
     __tablename__ = "cotizaciones"
+    __table_args__ = (
+        UniqueConstraint("distribuidor_id", "consecutivo", name="uq_distribuidor_consecutivo"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
-    consecutivo = Column(String, unique=True, index=True, nullable=False) # ej. COT-2001
+    distribuidor_id = Column(Integer, ForeignKey("distribuidores.id"), nullable=False, index=True)
+    consecutivo = Column(String, index=True, nullable=False) # ej. COT-2001 (único por distribuidor)
     cliente_id = Column(Integer, nullable=True)
     cliente_nombre = Column(String, default="Consumidor Final / Mostrador")
     cliente_nit = Column(String, nullable=True)
     observaciones = Column(String, nullable=True)
+    asesor_nombre = Column(String, nullable=True)
+    disenador_nombre = Column(String, nullable=True)
     estado = Column(String, default="ACTIVA")
     fecha_creacion = Column(DateTime, default=datetime.utcnow)
     total = Column(Float, default=0.0)

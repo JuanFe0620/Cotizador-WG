@@ -32,6 +32,8 @@ export default function SelectorBujes({ params = {}, setParams, bujes = [] }) {
     return !nombre.includes('cubo de ensamble');
   });
 
+  const esBrazoEnT = params.tipoBrazo === 'T' || params.tipoBrazo === 'T_BILATERAL';
+
   const handleBujeInicialChange = (e) => {
     const valor = e.target.value;
     const bujeObj = bujesCombinados.find(b => String(b.id) === String(valor)) || null;
@@ -53,10 +55,6 @@ export default function SelectorBujes({ params = {}, setParams, bujes = [] }) {
   const handleBujeFinalChange = (e) => {
     const valor = e.target.value;
     const bujeObj = bujesCombinados.find(b => String(b.id) === String(valor)) || null;
-    const esVideoportero = bujeObj && (
-      normalizar(bujeObj.nombre).includes('videoportero') || 
-      normalizar(bujeObj.nombre).includes('portero')
-    );
 
     setParams(prev => {
       const bujesPrevios = (prev.bujesSeleccionados || []).filter(
@@ -68,17 +66,25 @@ export default function SelectorBujes({ params = {}, setParams, bujes = [] }) {
         ...prev,
         bujeFinalId: valor,
         bujeFinal: bujeObj,
-        bujesSeleccionados: nuevosBujes,
-        ...(esVideoportero && { videoporteroPunta: true })
+        bujesSeleccionados: nuevosBujes
       };
     });
   };
 
-  const caperuzaActiva = Boolean(params.caperuzaBase || params.cubreAnclaje || params.caperuza);
-  const videoporteroActivo = Boolean(
-    params.videoporteroPunta || 
-    params.accesorioPunta === 'videoportero' ||
-    normalizar(params.bujeFinal?.nombre || '').includes('videoportero')
+  const tieneCaperuza = Boolean(
+    params.tieneCaperuza ??
+    params.caperuzaEmbellecedora ??
+    params.caperuzaBase ??
+    params.cubreAnclaje ??
+    params.caperuza
+  );
+
+  const tieneVideoportero = Boolean(
+    params.tieneVideoportero ??
+    params.accesorioVideoportero ??
+    params.videoporteroPunta ??
+    params.soporteVideoportero ??
+    params.accesorioPunta === 'videoportero'
   );
 
   return (
@@ -110,7 +116,7 @@ export default function SelectorBujes({ params = {}, setParams, bujes = [] }) {
         {/* Selector Buje Final (Carga) */}
         <div>
           <label className="text-[10px] font-medium text-slate-600 block mb-1 flex items-center gap-1">
-            <span>🎯</span> Buje / Accesorio Final (Punta):
+            <span>🎯</span> {esBrazoEnT ? 'Buje / Accesorio en Puntas T (x2):' : 'Buje / Accesorio Final (Punta):'}
           </label>
           <select
             value={params.bujeFinalId || ''}
@@ -120,7 +126,7 @@ export default function SelectorBujes({ params = {}, setParams, bujes = [] }) {
             <option value="">-- Sin Buje Carga --</option>
             {opcionesDisponibles.map(b => (
               <option key={b.id} value={b.id}>
-                {b.nombre || b.descripcion} {b.precio ? `(+$${Number(b.precio).toLocaleString('es-CO')})` : ''}
+                {b.nombre || b.descripcion} {b.precio ? `(+$${Number(b.precio).toLocaleString('es-CO')}${esBrazoEnT ? ' c/u' : ''})` : ''}
               </option>
             ))}
           </select>
@@ -133,13 +139,15 @@ export default function SelectorBujes({ params = {}, setParams, bujes = [] }) {
         <label className="flex items-start gap-2 cursor-pointer select-none bg-white p-2 rounded-lg border border-slate-200 hover:border-slate-300 transition">
           <input
             type="checkbox"
-            checked={caperuzaActiva}
+            checked={Boolean(tieneCaperuza)}
             onChange={(e) => {
-              const val = e.target.checked;
+              const checked = e.target.checked;
               setParams(prev => ({
                 ...prev,
-                caperuzaBase: val,
-                cubreAnclaje: val
+                tieneCaperuza: checked,
+                caperuzaEmbellecedora: checked,
+                caperuzaBase: checked,
+                cubreAnclaje: checked
               }));
             }}
             className="w-4 h-4 mt-0.5 rounded border-slate-300 text-blue-600 focus:ring-0"
@@ -158,24 +166,17 @@ export default function SelectorBujes({ params = {}, setParams, bujes = [] }) {
         <label className="flex items-start gap-2 cursor-pointer select-none bg-white p-2 rounded-lg border border-slate-200 hover:border-slate-300 transition">
           <input
             type="checkbox"
-            checked={videoporteroActivo}
+            checked={Boolean(tieneVideoportero)}
             onChange={(e) => {
-              const val = e.target.checked;
-              setParams(prev => {
-                const siguiente = {
-                  ...prev,
-                  videoporteroPunta: val,
-                  accesorioPunta: val ? 'videoportero' : ''
-                };
-                if (val && !prev.bujeFinalId) {
-                  const bujeVideo = bujesCombinados.find(b => normalizar(b.nombre).includes('videoportero'));
-                  if (bujeVideo) {
-                    siguiente.bujeFinalId = bujeVideo.id;
-                    siguiente.bujeFinal = bujeVideo;
-                  }
-                }
-                return siguiente;
-              });
+              const checked = e.target.checked;
+              setParams(prev => ({
+                ...prev,
+                tieneVideoportero: checked,
+                accesorioVideoportero: checked,
+                videoporteroPunta: checked,
+                soporteVideoportero: checked,
+                accesorioPunta: checked ? 'videoportero' : ''
+              }));
             }}
             className="w-4 h-4 mt-0.5 rounded border-slate-300 text-blue-600 focus:ring-0"
           />

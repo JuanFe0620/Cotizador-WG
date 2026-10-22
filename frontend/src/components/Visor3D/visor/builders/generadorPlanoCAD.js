@@ -131,7 +131,10 @@ export const capturar4VistasCAD = (scene, camera) => {
   };
 };
 
-export const construirPaginaPlanoCAD = async (pdf, visorRef, item, index = 1) => {
+// `marca`: { nombre, consecutivo } del distribuidor activo (o fábrica) para el pie de página (marca blanca)
+export const construirPaginaPlanoCAD = async (pdf, visorRef, item, index = 1, marca = {}) => {
+  const nombreMarca = String(marca?.nombre || 'Fábrica WG').slice(0, 60);
+  const refCotizacion = marca?.consecutivo ? ` | Cotización ${marca.consecutivo}` : '';
   if (!visorRef?.current) return;
 
   const instancias = visorRef.current.getInstanciasThree ? visorRef.current.getInstanciasThree() : visorRef.current;
@@ -182,7 +185,7 @@ export const construirPaginaPlanoCAD = async (pdf, visorRef, item, index = 1) =>
 
   pdf.setFontSize(7);
   pdf.setTextColor(148, 163, 184);
-  pdf.text("Plataforma Integrada M3 - Documentación Técnica CAD", 12, 285);
+  pdf.text(`${nombreMarca}${refCotizacion} - Documentación Técnica CAD`, 12, 285);
 
   // PÁGINA 2
   pdf.addPage();
@@ -259,5 +262,5 @@ export const construirPaginaPlanoCAD = async (pdf, visorRef, item, index = 1) =>
 
   pdf.setFontSize(7);
   pdf.setTextColor(148, 163, 184);
-  pdf.text("Planos multivista y despieces generados automáticamente por la Plataforma Integrada M3.", 12, 285);
+  pdf.text(`Planos multivista y despieces generados automáticamente para ${nombreMarca}${refCotizacion}.`, 12, 285);
 };

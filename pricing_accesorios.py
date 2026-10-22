@@ -101,11 +101,11 @@ def calcular_costo_accesorios_bd(
                     (models.Buje.nombre.ilike(f"%{palabra_clave}%"))
                 ).first()
 
-        # Determinación prioritaria del nombre real
-        if nombre_frontend:
-            nombre_acc = nombre_frontend
-        elif acc_db and getattr(acc_db, 'nombre', None):
+        # Determinación prioritaria del nombre real: la base de datos es la fuente de verdad
+        if acc_db and getattr(acc_db, 'nombre', None):
             nombre_acc = acc_db.nombre
+        elif nombre_frontend:
+            nombre_acc = nombre_frontend
         else:
             nombre_acc = str(acc_id).replace("acc_", "").replace("_", " ").title()
 

@@ -4,17 +4,17 @@ import { Shield, Sliders, Layers, Settings2 } from 'lucide-react';
 export const OPCIONES_MECANIZADO_FRONTAL = [
   {
     id: 'videoportero',
-    label: 'Calado Videoportero / Control de Acceso',
+    label: 'Control de Acceso',
     costoBase: 35000
   },
   {
     id: 'lpr',
-    label: 'Ventana LPR con visera/acrílico',
+    label: 'Citofono',
     costoBase: 50000
   },
   {
     id: 'biometrico',
-    label: 'Lector Biométrico / Teclado',
+    label: 'Lector Biométrico',
     costoBase: 35000
   }
 ];
@@ -27,17 +27,17 @@ export const OPCIONES_MECANIZADO_TRASERO = [
   },
   {
     id: 'videoportero',
-    label: 'Calado Videoportero / Control de Acceso',
+    label: 'Control de Acceso',
     costoBase: 35000
   },
   {
     id: 'biometrico',
-    label: 'Lector Biométrico / Teclado',
+    label: 'Lector Biométrico',
     costoBase: 35000
   },
   {
     id: 'lpr',
-    label: 'Ventana LPR con visera/acrílico',
+    label: 'Citofono',
     costoBase: 50000
   }
 ];

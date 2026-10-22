@@ -1,3 +1,5 @@
+from dotenv import load_dotenv
+load_dotenv()
 import os
 import csv
 import re
@@ -6,7 +8,7 @@ import mimetypes
 import traceback
 from typing import Optional, Any, Dict, List
 
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -16,6 +18,17 @@ import models
 from database import engine, get_db, SessionLocal
 from cad_generator import crear_paquete_plano
 from services import calcular_item_cotizacion
+import schemas as auth_schemas
+from auth import (
+    router as auth_router, acceso_global, obtener_usuario_actual, requiere_superadmin,
+    resolver_distribuidor_id, obtener_fabrica, ROL_SUPERADMIN, ROL_DISTRIBUIDOR,
+)
+from distribuidor_router import router as distribuidor_router
+from consecutivos import obtener_siguiente_consecutivo as _preview_consecutivo, reservar_consecutivo
+from migracion_multidistribuidor import migrar_multidistribuidor
+from margen import aplicar_margen_distribuidor
+from seguridad_precios import nivel_precio_valido
+from calculo_servidor import calcular_item_seguro
 
 # Intentamos importar la función de carga desde seed.py
 try:
@@ -30,7 +43,11 @@ except ImportError:
 models.Base.metadata.create_all(bind=engine)
 
 # 2. Inicializar FastAPI
-app = FastAPI(title="Cotizador Pro WG")
+# Dependencia global: exige JWT en todo salvo rutas públicas y aplica la política de roles
+# (/api/admin/** y escritura de catálogos de costos => SUPERADMIN).
+app = FastAPI(title="Cotizador Pro WG", dependencies=[Depends(acceso_global)])
+app.include_router(auth_router)
+app.include_router(distribuidor_router)
 
 # 3. Middleware CORS configurado
 app.add_middleware(
@@ -79,7 +96,7 @@ def sembrar_brazos_y_bujes_defecto(db: Session):
 
 
 # --- FUNCIÓN DE AUTO-CARGA DE CLIENTES DESDE CSV ---
-def sincronizar_clientes_csv(db: Session):
+def sincronizar_clientes_csv(db: Session, distribuidor_id: int):
     archivo_csv = "catalogoclienteshorizontal.csv"
     if not os.path.exists(archivo_csv):
         print(f"⚠️ El archivo {archivo_csv} no existe en la raíz.")
@@ -105,9 +122,13 @@ def sincronizar_clientes_csv(db: Session):
                         if nit_limpio in nits_procesados:
                             continue
 
-                        existente = db.query(models.Cliente).filter(models.Cliente.nit == nit_limpio).first()
+                        existente = db.query(models.Cliente).filter(
+                            models.Cliente.nit == nit_limpio,
+                            models.Cliente.distribuidor_id == distribuidor_id,
+                        ).first()
                         if not existente:
                             nuevo = models.Cliente(
+                                distribuidor_id=distribuidor_id,
                                 nit=nit_limpio,
                                 nombre=nombre,
                                 direccion=direccion,
@@ -131,7 +152,21 @@ from sqlalchemy import text
 @app.on_event("startup")
 def startup_db_client():
     models.Base.metadata.create_all(bind=engine)
+
+    # Migración ligera: create_all no agrega columnas a tablas ya existentes
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE cotizaciones ADD COLUMN IF NOT EXISTS asesor_nombre VARCHAR"))
+            conn.execute(text("ALTER TABLE cotizaciones ADD COLUMN IF NOT EXISTS disenador_nombre VARCHAR"))
+    except Exception as e:
+        print(f"❌ Error migrando columnas asesor/disenador: {e}")
     
+    try:
+        migrar_multidistribuidor(engine)
+    except Exception as e:
+        print(f"❌ Error en migración multi-distribuidor: {e}")
+        raise
+
     db = SessionLocal()
     try:
         if sembrar_datos:
@@ -141,7 +176,7 @@ def startup_db_client():
             print("⚠️ No se pudo importar la función de carga desde seed.py")
 
         sembrar_brazos_y_bujes_defecto(db)
-        sincronizar_clientes_csv(db)
+        sincronizar_clientes_csv(db, obtener_fabrica(db).id)
     except Exception as e:
         print(f"❌ Error durante la inicialización en startup: {e}")
     finally:
@@ -193,6 +228,10 @@ class ItemCotizacionSchema(BaseModel):
 
 
 class GuardarCotizacionReq(BaseModel):
+    distribuidor_id: Optional[int] = None  # solo lo respeta el SUPERADMIN
+    id: Optional[int] = None
+    cotizacion_id: Optional[int] = None
+    cotizacionId: Optional[int] = None
     consecutivo: Optional[str] = None
     cliente_id: Optional[int] = None
     clienteId: Optional[int] = None
@@ -200,6 +239,12 @@ class GuardarCotizacionReq(BaseModel):
     cliente_nombre: Optional[str] = None
     clienteNit: Optional[str] = None
     cliente_nit: Optional[str] = None
+    vendedor: Optional[str] = None
+    asesor_id: Optional[str] = None
+    asesor_nombre: Optional[str] = None
+    disenador: Optional[str] = None
+    disenador_id: Optional[str] = None
+    disenador_nombre: Optional[str] = None
     observaciones: Optional[str] = None
     notas: Optional[str] = None
     nivelPrecio: Optional[int] = 1
@@ -351,17 +396,13 @@ def serializar_mecanizado_totem(m: Any) -> Dict[str, Any]:
     }
 
 
-def obtener_siguiente_consecutivo_db(db: Session) -> str:
-    ultima = db.query(models.Cotizacion).order_by(models.Cotizacion.id.desc()).first()
-    if not ultima or not ultima.consecutivo:
-        return "COT-2001"
-    
-    num_str = re.sub(r'\D', '', ultima.consecutivo)
-    if num_str.isdigit():
-        nuevo_num = int(num_str) + 1
-        return f"COT-{nuevo_num}"
-    
-    return f"COT-{2000 + ultima.id + 1}"
+def obtener_siguiente_consecutivo(db: Session, distribuidor_id: int) -> str:
+    """Vista previa del próximo consecutivo del distribuidor (no incrementa). Ver consecutivos.py."""
+    return _preview_consecutivo(db, distribuidor_id)
+
+
+# Alias retrocompatible
+obtener_siguiente_consecutivo_db = obtener_siguiente_consecutivo
 
 
 # --- ENDPOINTS BUJES Y BRAZOS ---
@@ -475,13 +516,40 @@ def obtener_brazos(db: Session = Depends(get_db)):
 
 # --- ENDPOINTS CONSECUTIVO Y HISTORIAL DE COTIZACIONES ---
 @app.get("/api/cotizaciones/siguiente-consecutivo")
-def get_siguiente_consecutivo(db: Session = Depends(get_db)):
-    return {"consecutivo": obtener_siguiente_consecutivo_db(db)}
+def get_siguiente_consecutivo(
+    distribuidor_id: Optional[int] = Query(None, description="Solo SUPERADMIN"),
+    usuario: auth_schemas.UsuarioActual = Depends(obtener_usuario_actual),
+    db: Session = Depends(get_db),
+):
+    dist_id = resolver_distribuidor_id(usuario, db, distribuidor_id)
+    return {"consecutivo": obtener_siguiente_consecutivo(db, dist_id), "distribuidor_id": dist_id}
+
+
+def _query_cotizaciones_visibles(db: Session, usuario: auth_schemas.UsuarioActual):
+    """Aislamiento: un DISTRIBUIDOR solo ve sus cotizaciones; SUPERADMIN ve todas."""
+    query = db.query(models.Cotizacion)
+    if usuario.rol == ROL_DISTRIBUIDOR:
+        query = query.filter(models.Cotizacion.distribuidor_id == usuario.distribuidor_id)
+    return query
+
+
+def _cotizacion_visible_o_404(db: Session, usuario: auth_schemas.UsuarioActual, cotizacion_id: int) -> models.Cotizacion:
+    cot = _query_cotizaciones_visibles(db, usuario).filter(models.Cotizacion.id == cotizacion_id).first()
+    if not cot:  # 404 (no 403) para no revelar la existencia de cotizaciones ajenas
+        raise HTTPException(status_code=404, detail="Cotización no encontrada")
+    return cot
 
 
 @app.get("/api/cotizaciones")
-def listar_cotizaciones(q: Optional[str] = None, db: Session = Depends(get_db)):
-    query = db.query(models.Cotizacion)
+def listar_cotizaciones(
+    q: Optional[str] = None,
+    distribuidor_id: Optional[int] = Query(None, description="Solo SUPERADMIN: filtrar por distribuidor"),
+    usuario: auth_schemas.UsuarioActual = Depends(obtener_usuario_actual),
+    db: Session = Depends(get_db),
+):
+    query = _query_cotizaciones_visibles(db, usuario)
+    if usuario.rol == ROL_SUPERADMIN and distribuidor_id is not None:
+        query = query.filter(models.Cotizacion.distribuidor_id == distribuidor_id)
     if q:
         query = query.filter(
             (models.Cotizacion.consecutivo.ilike(f"%{q}%")) |
@@ -494,6 +562,7 @@ def listar_cotizaciones(q: Optional[str] = None, db: Session = Depends(get_db)):
     for c in cotizaciones:
         resultado.append({
             "id": c.id,
+            "distribuidor_id": c.distribuidor_id,
             "consecutivo": c.consecutivo,
             "cliente_id": getattr(c, "cliente_id", None),
             "cliente_nombre": c.cliente_nombre or "Consumidor Final / Mostrador",
@@ -508,10 +577,12 @@ def listar_cotizaciones(q: Optional[str] = None, db: Session = Depends(get_db)):
 
 
 @app.get("/api/cotizaciones/{cotizacion_id}")
-def obtener_cotizacion_detalle(cotizacion_id: int, db: Session = Depends(get_db)):
-    cot = db.query(models.Cotizacion).filter(models.Cotizacion.id == cotizacion_id).first()
-    if not cot:
-        raise HTTPException(status_code=404, detail="Cotización no encontrada")
+def obtener_cotizacion_detalle(
+    cotizacion_id: int,
+    usuario: auth_schemas.UsuarioActual = Depends(obtener_usuario_actual),
+    db: Session = Depends(get_db),
+):
+    cot = _cotizacion_visible_o_404(db, usuario, cotizacion_id)
 
     items_formateados = []
     if hasattr(cot, "items") and cot.items:
@@ -560,11 +631,22 @@ def obtener_cotizacion_detalle(cotizacion_id: int, db: Session = Depends(get_db)
 
     return {
         "id": cot.id,
+        "distribuidor_id": cot.distribuidor_id,
         "consecutivo": cot.consecutivo,
         "cliente_id": getattr(cot, "cliente_id", None),
         "cliente_nombre": cot.cliente_nombre or "Consumidor Final / Mostrador",
         "cliente_nit": cot.cliente_nit,
         "observaciones": getattr(cot, "observaciones", "") or "",
+        "asesor_nombre": getattr(cot, "asesor_nombre", None) or "",
+        "vendedor": getattr(cot, "asesor_nombre", None) or "",
+        "disenador_nombre": getattr(cot, "disenador_nombre", None) or "",
+        "disenador": getattr(cot, "disenador_nombre", None) or "",
+        "cliente": {
+            "id": getattr(cot, "cliente_id", None),
+            "nombre": cot.cliente_nombre or "Consumidor Final / Mostrador",
+            "nit": cot.cliente_nit or "",
+            "nit_cedula": cot.cliente_nit or "",
+        },
         "nivel_precio": cot.nivel_precio,
         "estado": getattr(cot, "estado", "ACTIVA"),
         "total": cot.total,
@@ -574,71 +656,187 @@ def obtener_cotizacion_detalle(cotizacion_id: int, db: Session = Depends(get_db)
 
 
 @app.post("/api/cotizaciones/guardar")
-def guardar_cotizacion(req: GuardarCotizacionReq, db: Session = Depends(get_db)):
+def guardar_cotizacion(
+    req: GuardarCotizacionReq,
+    usuario: auth_schemas.UsuarioActual = Depends(obtener_usuario_actual),
+    db: Session = Depends(get_db),
+):
+    # Distribuidor dueño de la cotización: el del token (DISTRIBUIDOR) o el indicado/fábrica (SUPERADMIN)
+    dist_id = resolver_distribuidor_id(usuario, db, req.distribuidor_id)
     try:
-        consecutivo_final = req.consecutivo
-        if not consecutivo_final or consecutivo_final == "COT-2001":
-            existente = db.query(models.Cotizacion).filter(models.Cotizacion.consecutivo == "COT-2001").first()
-            if existente:
-                consecutivo_final = obtener_siguiente_consecutivo_db(db)
-            else:
-                consecutivo_final = req.consecutivo or "COT-2001"
-
         cliente_id_val = req.cliente_id if req.cliente_id is not None else req.clienteId
         cliente_nom_val = req.clienteNombre or req.cliente_nombre or "Consumidor Final / Mostrador"
         cliente_nit_val = req.clienteNit or req.cliente_nit
         observaciones_val = req.observaciones or req.notas or ""
+        asesor_val = req.asesor_nombre or req.vendedor or req.asesor_id
+        disenador_val = req.disenador_nombre or req.disenador or req.disenador_id
+        nivel_precio_val = nivel_precio_valido(req.nivelPrecio)
 
-        nueva_cot = models.Cotizacion(
-            consecutivo=consecutivo_final,
-            cliente_id=cliente_id_val,
-            cliente_nombre=cliente_nom_val,
-            cliente_nit=cliente_nit_val,
-            observaciones=observaciones_val,
-            nivel_precio=req.nivelPrecio or 1,
-            total=req.total or 0.0,
-            estado="ACTIVA"
-        )
-        db.add(nueva_cot)
-        db.commit()
-        db.refresh(nueva_cot)
+        # === RECÁLCULO EN SERVIDOR: se ignoran total/precios enviados por el cliente ===
+        if not req.items:
+            raise HTTPException(status_code=422, detail="La cotización debe tener al menos un ítem.")
+        margen_dist = None
+        if usuario.rol == ROL_DISTRIBUIDOR:
+            dist_row = db.get(models.Distribuidor, usuario.distribuidor_id)
+            margen_dist = dist_row.margen_comercial_default if dist_row else 0.0
 
-        for item_data in req.items:
-            acc_json_str = json.dumps(item_data.accesoriosLista or [])
-            cfg_dict = item_data.configuracion or item_data.params or {}
-            cfg_json_str = json.dumps(cfg_dict)
+        items_calculados = []
+        ajustes = []
+        total_val = 0
+        for idx, item_data in enumerate(req.items):
+            cfg = dict(item_data.configuracion or item_data.params or {})
+            categoria_item = item_data.categoria or cfg.get("categoria") or ""
+            try:
+                cantidad = max(1, min(int(cfg.get("cantidad") or 1), 100000))
+            except (TypeError, ValueError):
+                cantidad = 1
+            nivel_item = nivel_precio_valido(cfg.get("nivelPrecio") or nivel_precio_val)
+            try:
+                resultado, maquila_unit = calcular_item_seguro(db, categoria_item, cfg, nivel_item, margen_dist)
+            except Exception as e_calc:
+                traceback.print_exc()
+                raise HTTPException(status_code=422, detail=f"No se pudo calcular el precio del ítem {idx + 1}: {e_calc}")
 
+            total_calculado = int(round(resultado["total"])) * cantidad
+            total_linea = total_calculado
+
+            # Precio personalizado (negociación): permitido, pero un distribuidor nunca por debajo del precio de fábrica
+            pers = cfg.get("precio_personalizado")
+            try:
+                pers = int(round(float(pers))) if pers is not None and pers != "" else None
+            except (TypeError, ValueError):
+                pers = None
+            if pers is not None and pers >= 0:
+                piso = int(round(maquila_unit)) * cantidad
+                if margen_dist is not None and pers < piso:
+                    ajustes.append(f"Ítem {idx + 1}: el precio personalizado estaba por debajo del precio de fábrica; se ajustó a {piso}.")
+                    pers = piso
+                total_linea = pers
+            else:
+                pers = None
+
+            cfg["cantidad"] = cantidad
+            cfg["nivelPrecio"] = nivel_item
+            cfg["precio_personalizado"] = pers
+            total_val += total_linea
+            items_calculados.append({"data": item_data, "cfg": cfg, "resultado": resultado,
+                                     "total_linea": total_linea, "total_calculado": total_calculado, "personalizado": pers})
+
+        # 1. Determinar si es una ACTUALIZACIÓN (por ID o por Consecutivo existente)
+        cot_id = req.id or req.cotizacion_id or req.cotizacionId
+        cotizacion_existente = None
+
+        if cot_id:
+            cotizacion_existente = _query_cotizaciones_visibles(db, usuario).filter(models.Cotizacion.id == cot_id).first()
+
+        if not cotizacion_existente and req.consecutivo:
+            # Si el consecutivo enviado ya existe en la base de datos, se actualiza dicha cotización
+            consecutivo_busqueda = req.consecutivo.strip()
+            cotizacion_existente = db.query(models.Cotizacion).filter(
+                models.Cotizacion.distribuidor_id == dist_id,
+                models.Cotizacion.consecutivo == consecutivo_busqueda,
+            ).first()
+
+        es_edicion = cotizacion_existente is not None
+
+        if es_edicion:
+            # === CASO UPDATE ===
+            cotizacion_actual = cotizacion_existente
+            cotizacion_actual.cliente_id = cliente_id_val
+            cotizacion_actual.cliente_nombre = cliente_nom_val
+            cotizacion_actual.cliente_nit = cliente_nit_val
+            cotizacion_actual.observaciones = observaciones_val
+            cotizacion_actual.asesor_nombre = asesor_val
+            cotizacion_actual.disenador_nombre = disenador_val
+            cotizacion_actual.nivel_precio = nivel_precio_val
+            cotizacion_actual.total = total_val
+            cotizacion_actual.estado = "ACTIVA"
+
+            # Reemplazar ítems: eliminar antiguos e insertar nuevos
+            db.query(models.CotizacionItem).filter(
+                models.CotizacionItem.cotizacion_id == cotizacion_actual.id
+            ).delete()
+        else:
+            # === CASO INSERT (NUEVA COTIZACIÓN) ===
+            # El backend es la única fuente de verdad para el consecutivo de cotizaciones nuevas
+            # Reserva atómica (SELECT ... FOR UPDATE) dentro de esta misma transacción
+            consecutivo_final = reservar_consecutivo(db, dist_id)
+
+            cotizacion_actual = models.Cotizacion(
+                distribuidor_id=dist_id,
+                consecutivo=consecutivo_final,
+                cliente_id=cliente_id_val,
+                cliente_nombre=cliente_nom_val,
+                cliente_nit=cliente_nit_val,
+                observaciones=observaciones_val,
+                asesor_nombre=asesor_val,
+                disenador_nombre=disenador_val,
+                nivel_precio=nivel_precio_val,
+                total=total_val,
+                estado="ACTIVA"
+            )
+            db.add(cotizacion_actual)
+            db.flush()  # Obtener el ID asignado dentro de la transacción
+
+        # 2. Insertar ítems con los valores calculados por el servidor
+        for calc in items_calculados:
+            item_data, res = calc["data"], calc["resultado"]
+            estructura = res.get("costoEstructura") or 0.0
             item_db = models.CotizacionItem(
-                cotizacion_id=nueva_cot.id,
+                cotizacion_id=cotizacion_actual.id,
                 categoria=item_data.categoria,
                 descripcion=item_data.descripcion,
                 lamina=item_data.lamina,
                 pintura=item_data.pintura,
-                costo_pintura=item_data.costoPintura or 0.0,
-                costo_tubos=item_data.costoTubos or 0.0,
-                area_pintable=item_data.areaPintable or 0.0,
+                costo_pintura=res.get("costoPintura") or 0.0,
+                costo_tubos=estructura,
+                area_pintable=res.get("area_m2") or 0.0,
                 alto=item_data.alto or 0.0,
                 ancho=item_data.ancho or 0.0,
                 fondo=item_data.fondo or 0.0,
-                costo_base=item_data.costoBase or 0.0,
-                total=item_data.total or 0.0,
-                accesorios_json=acc_json_str,
-                configuracion_json=cfg_json_str
+                costo_base=estructura,
+                total=calc["total_linea"],
+                accesorios_json=json.dumps(res.get("accesorios_lista") or []),
+                configuracion_json=json.dumps(calc["cfg"])
             )
             db.add(item_db)
 
         db.commit()
-        db.refresh(nueva_cot)
+        db.refresh(cotizacion_actual)
 
-        siguiente_consecutivo = obtener_siguiente_consecutivo_db(db)
+        siguiente_consecutivo = obtener_siguiente_consecutivo(db, cotizacion_actual.distribuidor_id)
 
         return {
             "ok": True,
-            "id": nueva_cot.id,
-            "consecutivo_guardado": nueva_cot.consecutivo,
+            "id": cotizacion_actual.id,
+            "consecutivo": cotizacion_actual.consecutivo,
+            "consecutivo_guardado": cotizacion_actual.consecutivo,
             "siguiente_consecutivo": siguiente_consecutivo,
-            "mensaje": f"Cotización {nueva_cot.consecutivo} guardada exitosamente."
+            "es_actualizacion": es_edicion,
+            "total": total_val,
+            # Valores canónicos del servidor para que la UI, el PDF y la BD coincidan
+            "items_calculados": [
+                {
+                    "indice": n,
+                    "cantidad": c["cfg"]["cantidad"],
+                    "nivelPrecio": c["cfg"]["nivelPrecio"],
+                    "costoEstructura": c["resultado"].get("costoEstructura"),
+                    "costoPintura": c["resultado"].get("costoPintura"),
+                    "costoAccesorios": c["resultado"].get("costoAccesorios"),
+                    "accesorios_lista": c["resultado"].get("accesorios_lista") or [],
+                    "area_m2": c["resultado"].get("area_m2"),
+                    "total_calculado": c["total_calculado"],
+                    "precio_personalizado": c["personalizado"],
+                    "total": c["total_linea"],
+                }
+                for n, c in enumerate(items_calculados)
+            ],
+            "ajustes": ajustes,
+            "mensaje": f"Cotización {cotizacion_actual.consecutivo} {'actualizada' if es_edicion else 'guardada'} exitosamente."
         }
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
         db.rollback()
         traceback.print_exc()
@@ -647,12 +845,13 @@ def guardar_cotizacion(req: GuardarCotizacionReq, db: Session = Depends(get_db))
 
 # --- GESTIÓN DE ESTADO (ANULAR Y ELIMINAR) ---
 @app.patch("/api/cotizaciones/{cotizacion_id}/anular")
-def anular_cotizacion(cotizacion_id: int, db: Session = Depends(get_db)):
+def anular_cotizacion(
+    cotizacion_id: int,
+    usuario: auth_schemas.UsuarioActual = Depends(obtener_usuario_actual),
+    db: Session = Depends(get_db),
+):
     """Cambia el estado de una cotización a 'ANULADA'."""
-    cotizacion = db.query(models.Cotizacion).filter(models.Cotizacion.id == cotizacion_id).first()
-    
-    if not cotizacion:
-        raise HTTPException(status_code=404, detail="Cotización no encontrada")
+    cotizacion = _cotizacion_visible_o_404(db, usuario, cotizacion_id)
     
     if getattr(cotizacion, "estado", None) == "ANULADA":
         raise HTTPException(status_code=400, detail="La cotización ya está anulada")
@@ -671,12 +870,13 @@ def anular_cotizacion(cotizacion_id: int, db: Session = Depends(get_db)):
 
 
 @app.delete("/api/cotizaciones/{cotizacion_id}")
-def eliminar_cotizacion(cotizacion_id: int, db: Session = Depends(get_db)):
+def eliminar_cotizacion(
+    cotizacion_id: int,
+    usuario: auth_schemas.UsuarioActual = Depends(obtener_usuario_actual),
+    db: Session = Depends(get_db),
+):
     """Eliminación física de la cotización y sus ítems."""
-    cotizacion = db.query(models.Cotizacion).filter(models.Cotizacion.id == cotizacion_id).first()
-    
-    if not cotizacion:
-        raise HTTPException(status_code=404, detail="Cotización no encontrada")
+    cotizacion = _cotizacion_visible_o_404(db, usuario, cotizacion_id)
 
     if hasattr(models, 'CotizacionItem'):
         db.query(models.CotizacionItem).filter(models.CotizacionItem.cotizacion_id == cotizacion_id).delete()
@@ -694,8 +894,14 @@ def eliminar_cotizacion(cotizacion_id: int, db: Session = Depends(get_db)):
 # --- ENDPOINTS CLIENTES ---
 @app.get("/api/clientes")
 @app.get("/clientes")
-def obtener_clientes(q: Optional[str] = None, db: Session = Depends(get_db)):
-    query = db.query(models.Cliente)
+def obtener_clientes(
+    q: Optional[str] = None,
+    usuario: auth_schemas.UsuarioActual = Depends(obtener_usuario_actual),
+    db: Session = Depends(get_db),
+):
+    query = db.query(models.Cliente).filter(
+        models.Cliente.distribuidor_id == resolver_distribuidor_id(usuario, db)
+    )
     if q:
         q_limpio = re.sub(r'[\s.,-]', '', q)
         query = query.filter(
@@ -709,16 +915,24 @@ def obtener_clientes(q: Optional[str] = None, db: Session = Depends(get_db)):
 
 @app.post("/api/clientes")
 @app.post("/clientes")
-def crear_cliente(cliente: ClienteSchema, db: Session = Depends(get_db)):
+def crear_cliente(
+    cliente: ClienteSchema,
+    usuario: auth_schemas.UsuarioActual = Depends(obtener_usuario_actual),
+    db: Session = Depends(get_db),
+):
+    dist_id = resolver_distribuidor_id(usuario, db)
     raw_nit = cliente.nit or cliente.nit_cedula or ""
     nit_valor = re.sub(r'[\s.,-]', '', raw_nit) if raw_nit else ""
     
     if nit_valor:
-        existente = db.query(models.Cliente).filter(models.Cliente.nit == nit_valor).first()
+        existente = db.query(models.Cliente).filter(
+            models.Cliente.nit == nit_valor, models.Cliente.distribuidor_id == dist_id
+        ).first()
         if existente:
             return serializar_cliente(existente)
         
     db_item = models.Cliente(
+        distribuidor_id=dist_id,
         nit=nit_valor,
         nombre=cliente.nombre,
         direccion=cliente.direccion,
@@ -733,8 +947,16 @@ def crear_cliente(cliente: ClienteSchema, db: Session = Depends(get_db)):
 
 @app.put("/api/clientes/{cliente_id}")
 @app.put("/clientes/{cliente_id}")
-def actualizar_cliente(cliente_id: int, cliente: ClienteSchema, db: Session = Depends(get_db)):
-    db_item = db.query(models.Cliente).filter(models.Cliente.id == cliente_id).first()
+def actualizar_cliente(
+    cliente_id: int,
+    cliente: ClienteSchema,
+    usuario: auth_schemas.UsuarioActual = Depends(obtener_usuario_actual),
+    db: Session = Depends(get_db),
+):
+    db_item = db.query(models.Cliente).filter(
+        models.Cliente.id == cliente_id,
+        models.Cliente.distribuidor_id == resolver_distribuidor_id(usuario, db),
+    ).first()
     if not db_item:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
     
@@ -756,8 +978,15 @@ def actualizar_cliente(cliente_id: int, cliente: ClienteSchema, db: Session = De
 
 @app.delete("/api/clientes/{cliente_id}")
 @app.delete("/clientes/{cliente_id}")
-def eliminar_cliente(cliente_id: int, db: Session = Depends(get_db)):
-    db_item = db.query(models.Cliente).filter(models.Cliente.id == cliente_id).first()
+def eliminar_cliente(
+    cliente_id: int,
+    usuario: auth_schemas.UsuarioActual = Depends(obtener_usuario_actual),
+    db: Session = Depends(get_db),
+):
+    db_item = db.query(models.Cliente).filter(
+        models.Cliente.id == cliente_id,
+        models.Cliente.distribuidor_id == resolver_distribuidor_id(usuario, db),
+    ).first()
     if not db_item:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
     db.delete(db_item)
@@ -767,21 +996,19 @@ def eliminar_cliente(cliente_id: int, db: Session = Depends(get_db)):
 
 # --- ENDPOINTS CORE ---
 @app.post("/api/cotizar/item")
-def cotizar_item(req: CotizarItemReq, db: Session = Depends(get_db)):
+def cotizar_item(
+    req: CotizarItemReq,
+    usuario: auth_schemas.UsuarioActual = Depends(obtener_usuario_actual),
+    db: Session = Depends(get_db),
+):
     try:
-        params_limpios = dict(req.params)
-        
-        if req.categoria.lower() == "gabinetes":
-            params_limpios["incluirBase"] = False
-            params_limpios["incluirPlatina"] = False
-            params_limpios["incluirPiesAmigo"] = False
-
-        resultado = calcular_item_cotizacion(
-            categoria=req.categoria,
-            params=params_limpios,
-            nivel_precio=req.nivelPrecio,
-            db=db
-        )
+        margen = None
+        if usuario.rol == ROL_DISTRIBUIDOR:
+            # Precio de maquila (fábrica) -> precio de venta del distribuidor; sin costos internos
+            dist = db.get(models.Distribuidor, usuario.distribuidor_id)
+            margen = dist.margen_comercial_default if dist else 0.0
+        # BLINDAJE: ignora precios del cliente; usa solo costos vigentes de la BD (ver seguridad_precios.py)
+        resultado, _ = calcular_item_seguro(db, req.categoria, req.params, req.nivelPrecio, margen)
         return resultado
     except Exception as e:
         traceback.print_exc()

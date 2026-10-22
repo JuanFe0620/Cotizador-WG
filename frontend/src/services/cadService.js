@@ -16,3 +16,9 @@ export async function generarPlano(payload) {
 
   return await response.json();
 }
+
+// Descarga autenticada del paquete de planos (window.open no puede enviar el header Authorization)
+export async function descargarPlano(url, nombreArchivo) {
+  const { descargarArchivoAutenticado } = await import('./apiClient');
+  return descargarArchivoAutenticado(url, nombreArchivo);
+}

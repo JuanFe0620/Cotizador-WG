@@ -120,7 +120,7 @@ export default function Configurador({
       alto: esNuevoTotem ? 150 : '',
       ancho: esNuevoTotem ? 25 : '',
       fondo: esNuevoTotem ? 15 : '',
-       ...(esNuevoTotem && {
+      ...(esNuevoTotem && {
         alto_cm: 150,
         ancho_cm: 25,
         fondo_cm: 15,
@@ -134,6 +134,18 @@ export default function Configurador({
         colorPintura: '#1e293b',
         pintura: '#1e293b'
       }),
+      tipoBrazo: 'SIMPLE_L',
+      conPieDeAmigo: false,
+      longitudTravesanoT: 50,
+      tieneCaperuza: false,
+      caperuzaEmbellecedora: false,
+      caperuzaBase: false,
+      cubreAnclaje: false,
+      tieneVideoportero: false,
+      accesorioVideoportero: false,
+      videoporteroPunta: false,
+      soporteVideoportero: false,
+      accesorioPunta: '',
       tramos: [],
       accesoriosSeleccionados: [],
       detallesAccesorios: {},
@@ -335,7 +347,12 @@ export default function Configurador({
     const bujeInicialObj = bujes.find(b => String(b.id) === String(params.bujeInicialId)) || null;
     const bujeFinalObj = bujes.find(b => String(b.id) === String(params.bujeFinalId)) || null;
 
-    // 2. Extraer IDs de accesorios manuales seleccionados
+    // 2. Lista limpia de Bujes para el backend
+    const bujesSeleccionadosLimpios = [];
+    if (params.bujeInicialId) bujesSeleccionadosLimpios.push(params.bujeInicialId);
+    if (params.bujeFinalId) bujesSeleccionadosLimpios.push(params.bujeFinalId);
+
+    // 3. Extraer IDs de accesorios manuales seleccionados
     const rawAccSeleccionados = params.accesoriosSeleccionados || [];
     
     const accFiltrados = rawAccSeleccionados.filter(accItem => {
@@ -358,43 +375,90 @@ export default function Configurador({
       return { id: accId, cantidad: cant };
     });
 
-    if (params.caperuzaBase) {
+    const tieneCaperuza = Boolean(
+      params.tieneCaperuza ??
+      params.caperuzaEmbellecedora ??
+      params.caperuzaBase ??
+      params.cubreAnclaje ??
+      params.caperuza
+    );
+
+    const tieneVideoportero = Boolean(
+      params.tieneVideoportero ??
+      params.accesorioVideoportero ??
+      params.videoporteroPunta ??
+      params.soporteVideoportero ??
+      params.accesorioPunta === 'videoportero'
+    );
+
+    if (tieneCaperuza) {
       if (!listaAcc.some(a => String(a.id || '').toLowerCase().includes('caperuza'))) {
-        listaAcc.push({ id: 'Caperuza / Cubre-anclaje Embellecedora', cantidad: 1 });
+        listaAcc.push({
+          id: 'caperuza_embellecedora',
+          nombre: 'Caperuza / Cubre-anclaje Embellecedora',
+          cantidad: 1,
+          precioUnitario: 25000,
+          precio: 25000,
+          total: 25000
+        });
       }
     }
-    if (params.videoporteroPunta) {
-      if (!listaAcc.some(a => String(a.id || '').toLowerCase().includes('videoportero')) &&
-          !bujesSeleccionadosLimpios.some(b => String(b).toLowerCase().includes('videoportero'))) {
-        listaAcc.push({ id: 'Soporte Caja Videoportero en Punta', cantidad: 1 });
+    if (tieneVideoportero) {
+      if (!listaAcc.some(a => String(a.id || '').toLowerCase().includes('videoportero'))) {
+        listaAcc.push({
+          id: 'accesorio_videoportero_punta',
+          nombre: 'Accesorio Videoportero en Punta de Brazo',
+          cantidad: 1,
+          precioUnitario: 45000,
+          precio: 45000,
+          total: 45000
+        });
       }
     }
 
-    // 3. Tramos
+    // 4. Tramos
     const tramosLista = (params.tramos || []).map(t => {
       const tuboObj = tubos.find(tb => String(tb.id) === String(t.tuboId)) || {};
+      const formaReal = (tuboObj.forma || t.forma || t.tipo || 'redondo').toLowerCase();
+      const esCuad = formaReal.includes('cuad') || formaReal.includes('rect');
+      const anchoCm = tuboObj.ancho_cm ?? t.ancho_cm ?? '';
+      const altoCm = tuboObj.alto_cm ?? t.alto_cm ?? anchoCm ?? '';
+      const diamPulg = tuboObj.diametro_pulg ?? tuboObj.diametro ?? t.diametro_pulg ?? t.diametro ?? '';
+
       return {
         ...t,
-        tipoTubo: tuboObj.tipo || tuboObj.tipo_tubo || t.tipoTubo || 'Tubo Industrial',
-        tuboNombre: tuboObj.nombre || tuboObj.descripcion || t.tuboNombre || `Tubo Ø ${tuboObj.diametro || ''}`,
-        diametro: tuboObj.diametro || tuboObj.diametroTexto || t.diametro || '',
+        forma: formaReal,
+        tipo: formaReal,
+        tipoPerfil: formaReal,
+        seccion: formaReal,
+        ancho_cm: anchoCm,
+        alto_cm: altoCm,
+        diametro_pulg: diamPulg,
+        tipoTubo: tuboObj.tipo || tuboObj.tipo_tubo || t.tipoTubo || (esCuad ? 'Tubo Cuadrado' : 'Tubo Redondo'),
+        tuboNombre: tuboObj.nombre || tuboObj.descripcion || t.tuboNombre || (
+          esCuad
+            ? `Tubo Cuadrado ${anchoCm}x${altoCm} cm`
+            : `Tubo Ø ${diamPulg}"`
+        ),
+        diametro: diamPulg,
         calibre: tuboObj.calibre || tuboObj.calibreTexto || tuboObj.espesor || t.calibre || 'Calibre Estándar'
       };
     });
 
-    const sumaTramos = tramosLista.reduce((acc, t) => {
+    const sumaTramosBase = tramosLista.reduce((acc, t) => {
       const val = parseFloat(t.alto || t.longitud || 0);
       return acc + (val < 10 ? val * 100 : val);
     }, 0);
 
+    const extraTravesanoT = (esBrazo && (params.tipoBrazo === 'T' || params.tipoBrazo === 'T_BILATERAL'))
+      ? (parseFloat(params.longitudTravesanoT) || 50)
+      : 0;
+
+    const sumaTramos = sumaTramosBase + extraTravesanoT;
+
     const altoCalculado = esGabinete || esTotem 
       ? (parseFloat(params.alto) || 100) 
       : (sumaTramos > 0 ? sumaTramos : (parseFloat(params.alto) || 150));
-
-    // 4. Lista limpia de Bujes para el backend
-    const bujesSeleccionadosLimpios = [];
-    if (params.bujeInicialId) bujesSeleccionadosLimpios.push(params.bujeInicialId);
-    if (params.bujeFinalId) bujesSeleccionadosLimpios.push(params.bujeFinalId);
 
     // 5. Payload Final perfectamente estructurado
     const payloadFinal = JSON.parse(JSON.stringify({

@@ -23,6 +23,9 @@ export default function Resumen({
   setItems, 
   consecutivo = 'COT-2001', 
   setConsecutivo, 
+  cotizacionId = null,
+  setCotizacionId,
+  accesorios = [],
   visorRef, 
   onGuardarCotizacion,
   clienteSeleccionado: clienteProp,
@@ -30,8 +33,15 @@ export default function Resumen({
   notas: notasProp,
   setNotas: setNotasProp,
   vendedor: vendedorProp,
+  setVendedor: setVendedorProp,
   disenador: disenadorProp,
-  API_BASE_URL = 'http://127.0.0.1:8000'
+  setDisenador: setDisenadorProp,
+  API_BASE_URL = 'http://127.0.0.1:8000',
+  nivelPrecio = 1,
+  // Marca blanca / equipo propio del distribuidor (por defecto: listas y membrete de fábrica)
+  listaVendedores = LISTA_VENDEDORES,
+  listaDisenadores = LISTA_DISENADORES,
+  membrete = null
 }) {
   const [clienteInterno, setClienteInterno] = useState(null);
   const clienteSeleccionado = clienteProp !== undefined ? clienteProp : clienteInterno;
@@ -41,8 +51,20 @@ export default function Resumen({
   const notas = notasProp !== undefined ? notasProp : notasInterno;
   const setNotas = setNotasProp || setNotasInterno;
 
-  const [vendedorSeleccionado, setVendedorSeleccionado] = useState(vendedorProp || LISTA_VENDEDORES[0]);
-  const [disenadorSeleccionado, setDisenadorSeleccionado] = useState(disenadorProp || LISTA_DISENADORES[0]);
+  // Estado controlado desde App (se restaura al cargar una cotización); con fallback interno
+  const [vendedorInterno, setVendedorInterno] = useState(LISTA_VENDEDORES[0]);
+  const vendedorSeleccionado = vendedorProp !== undefined ? vendedorProp : vendedorInterno;
+  const setVendedorSeleccionado = setVendedorProp || setVendedorInterno;
+
+  const [disenadorInterno, setDisenadorInterno] = useState(LISTA_DISENADORES[0]);
+  const disenadorSeleccionado = disenadorProp !== undefined ? disenadorProp : disenadorInterno;
+  const setDisenadorSeleccionado = setDisenadorProp || setDisenadorInterno;
+
+  // Si el valor guardado no está en la lista (dato histórico), se agrega para que el select lo muestre
+  const opcionesVendedor = listaVendedores.includes(vendedorSeleccionado) || !vendedorSeleccionado
+    ? listaVendedores : [vendedorSeleccionado, ...listaVendedores];
+  const opcionesDisenador = listaDisenadores.includes(disenadorSeleccionado) || !disenadorSeleccionado
+    ? listaDisenadores : [disenadorSeleccionado, ...listaDisenadores];
 
   const [modalCliente, setModalCliente] = useState(false);
   const [clientes, setClientes] = useState([]);
@@ -90,17 +112,84 @@ export default function Resumen({
     // 1. Obtener lista limpia enviada desde la API
     const rawAccs = item.accesoriosLista || item.accesorios_lista || item.detalles?.accesoriosLista || [];
     
-    const accesorios = rawAccs.filter(a => {
-      if (!a) return false;
-      const nom = String(a.nombre || a.descripcion || '').toLowerCase();
-      const idStr = String(a.id || '').toLowerCase();
-      if (item.categoria === 'BRAZOS' || item.categoria === 'BRAZO') {
-        if ((nom.includes('cubo') || idStr.includes('cubo') || nom.includes('perno') || idStr.includes('perno')) && !a.seleccionadoExplicitamente) {
-          return false;
+    const accesorios = rawAccs
+      .filter(a => {
+        if (!a) return false;
+        const nom = String(a.nombre || a.descripcion || '').toLowerCase();
+        const idStr = String(a.id || '').toLowerCase();
+        if (item.categoria === 'BRAZOS' || item.categoria === 'BRAZO') {
+          if ((nom.includes('cubo') || idStr.includes('cubo') || nom.includes('perno') || idStr.includes('perno')) && !a.seleccionadoExplicitamente) {
+            return false;
+          }
+        }
+        return true;
+      })
+      .map(a => ({ ...a }));
+
+    // Garantizar evaluación de Caperuza (+$25.000) y Accesorio Videoportero (+$45.000) en Brazos
+    const cfgBrazo = item.configuracion || item.params || item.detalles || item;
+    const esItemBrazo = String(item.categoria || cfgBrazo.categoria || '').toUpperCase().includes('BRAZO');
+
+    if (esItemBrazo) {
+      const tieneCaperuza = Boolean(
+        cfgBrazo.tieneCaperuza ??
+        cfgBrazo.caperuzaEmbellecedora ??
+        cfgBrazo.caperuzaBase ??
+        cfgBrazo.cubreAnclaje ??
+        cfgBrazo.caperuza ??
+        item.tieneCaperuza ??
+        item.caperuzaBase
+      );
+
+      const tieneVideoportero = Boolean(
+        cfgBrazo.tieneVideoportero ??
+        cfgBrazo.accesorioVideoportero ??
+        cfgBrazo.videoporteroPunta ??
+        cfgBrazo.soporteVideoportero ??
+        cfgBrazo.accesorioPunta === 'videoportero' ??
+        item.tieneVideoportero ??
+        item.videoporteroPunta
+      );
+
+      if (tieneCaperuza) {
+        const idxCap = accesorios.findIndex(a => {
+          const txt = `${a.id || ''} ${a.nombre || ''}`.toLowerCase();
+          return txt.includes('caperuza') || txt.includes('cubre-anclaje') || txt.includes('cubre anclaje');
+        });
+        const objCap = {
+          id: 'caperuza_embellecedora',
+          nombre: 'Caperuza / Cubre-anclaje Embellecedora',
+          cantidad: 1,
+          precioUnitario: 25000,
+          precio: 25000,
+          total: 25000
+        };
+        // Si el servidor ya la calculó (con margen del distribuidor) se respeta su precio
+        if (idxCap < 0) {
+          accesorios.push(objCap);
         }
       }
-      return true;
-    });
+
+      if (tieneVideoportero) {
+        const idxVid = accesorios.findIndex(a => {
+          const idStr = String(a.id || '').toLowerCase();
+          const nomStr = String(a.nombre || '').toLowerCase();
+          const esBuje = idStr.startsWith('buje_') || nomStr.startsWith('buje:');
+          return !esBuje && (idStr.includes('videoportero') || nomStr.includes('videoportero') || nomStr.includes('portero'));
+        });
+        const objVid = {
+          id: 'accesorio_videoportero_punta',
+          nombre: 'Accesorio Videoportero en Punta de Brazo',
+          cantidad: 1,
+          precioUnitario: 45000,
+          precio: 45000,
+          total: 45000
+        };
+        if (idxVid < 0) {
+          accesorios.push(objVid);
+        }
+      }
+    }
 
     // Suma exacta de lo que viene en la lista de accesorios (Bujes + Bases + Accesorios manuales)
     const sumaAccesoriosLista = accesorios.reduce((acc, a) => {
@@ -394,6 +483,34 @@ export default function Resumen({
     }
   };
 
+  // Fusiona los valores calculados por el servidor (fuente de verdad) en los ítems locales
+  const aplicarCalculoServidor = (itemsBase, data) => {
+    if (!data || !Array.isArray(data.items_calculados)) return itemsBase;
+    return itemsBase.map((it, i) => {
+      const c = data.items_calculados[i];
+      if (!c) return it;
+      const pers = c.precio_personalizado;
+      return {
+        ...it,
+        cantidad: c.cantidad,
+        nivelPrecio: c.nivelPrecio,
+        costoEstructura: c.costoEstructura,
+        costoBase: c.costoEstructura,
+        costoTubos: c.costoEstructura,
+        costoPintura: c.costoPintura,
+        costoAccesorios: c.costoAccesorios,
+        accesoriosLista: c.accesorios_lista,
+        accesorios_lista: c.accesorios_lista,
+        precio_personalizado: pers,
+        precioPersonalizado: pers,
+        total: c.total,
+        subtotal: c.total,
+        precio_unitario: Math.round(c.total / Math.max(1, c.cantidad)),
+        configuracion: it.configuracion ? { ...it.configuracion, nivelPrecio: c.nivelPrecio, precio_personalizado: pers } : it.configuracion
+      };
+    });
+  };
+
   const guardarCotizacionBD = async (silencioso = false) => {
     if (items.length === 0) {
       if (!silencioso) alert("No hay ítems para guardar en la cotización.");
@@ -457,6 +574,7 @@ export default function Resumen({
 
       const url = `${baseUrl}/api/cotizaciones/guardar`;
       const payload = {
+        id: cotizacionId,
         consecutivo: consecutivo,
         cliente_id: clienteSeleccionado?.id || null,
         clienteId: clienteSeleccionado?.id || null,
@@ -465,10 +583,12 @@ export default function Resumen({
         clienteNit: obtenerNit(clienteSeleccionado) || null,
         cliente_nit: obtenerNit(clienteSeleccionado) || null,
         vendedor: vendedorSeleccionado,
+        asesor_nombre: vendedorSeleccionado,
         disenador: disenadorSeleccionado,
+        disenador_nombre: disenadorSeleccionado,
         observaciones: notas || '',
         notas: notas || '',
-        nivelPrecio: 1,
+        nivelPrecio: nivelPrecio,
         total: totalCotizacion,
         items: itemsPayload
       };
@@ -486,12 +606,24 @@ export default function Resumen({
 
       const data = await res.json();
 
-      if (data.consecutivo_guardado) {
-        setConsecutivo(data.consecutivo_guardado);
+      // El servidor recalcula precios y totales: la interfaz adopta exactamente esos valores
+      if (Array.isArray(data.items_calculados) && setItems) {
+        setItems(prev => aplicarCalculoServidor(prev, data));
+      }
+      if (Array.isArray(data.ajustes) && data.ajustes.length > 0) {
+        alert(data.ajustes.join('\n'));
+      }
+
+      if (data.id && setCotizacionId) {
+        setCotizacionId(data.id);
+      }
+
+      if (data.consecutivo_guardado || data.consecutivo) {
+        setConsecutivo(data.consecutivo_guardado || data.consecutivo);
       }
 
       if (!silencioso) {
-        setMensajeGuardado(data.mensaje || `Cotización ${data.consecutivo_guardado || consecutivo} guardada con éxito`);
+        setMensajeGuardado(data.mensaje || `Cotización ${data.consecutivo_guardado || data.consecutivo || consecutivo} guardada con éxito`);
         setTimeout(() => setMensajeGuardado(null), 3500);
       }
 
@@ -534,8 +666,8 @@ export default function Resumen({
 
       // 2. Exportar el PDF con el consecutivo confirmado, vendedor y diseñador
       exportarPdfTecnico({
-        items,
-        totalCotizacion,
+        items: aplicarCalculoServidor(items, dataGuardado),
+        totalCotizacion: dataGuardado?.total ?? totalCotizacion,
         consecutivo: consecutivoFinal,
         clienteSeleccionado,
         vendedor: vendedorSeleccionado,
@@ -555,7 +687,10 @@ export default function Resumen({
         numeroALetrasCOP,
         formatoMonedaSinSimbolo,
         visorRef,
-        setGenerandoPdf
+        setGenerandoPdf,
+        membrete,
+        vendedoresLista: listaVendedores,
+        disenadoresLista: listaDisenadores
       });
     } catch (err) {
       console.error("Error al exportar PDF:", err);
@@ -636,7 +771,8 @@ export default function Resumen({
             onChange={(e) => setVendedorSeleccionado(e.target.value)}
             className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1.5 text-xs text-slate-800 font-semibold outline-none focus:border-blue-500 shadow-sm cursor-pointer"
           >
-            {LISTA_VENDEDORES.map((v, idx) => (
+            {opcionesVendedor.length === 0 && <option value="">Agrega asesores en “Mi Perfil”</option>}
+            {opcionesVendedor.map((v, idx) => (
               <option key={idx} value={v}>{v}</option>
             ))}
           </select>
@@ -652,7 +788,8 @@ export default function Resumen({
             onChange={(e) => setDisenadorSeleccionado(e.target.value)}
             className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1.5 text-xs text-slate-800 font-semibold outline-none focus:border-blue-500 shadow-sm cursor-pointer"
           >
-            {LISTA_DISENADORES.map((d, idx) => (
+            {opcionesDisenador.length === 0 && <option value="">Agrega diseñadores en “Mi Perfil”</option>}
+            {opcionesDisenador.map((d, idx) => (
               <option key={idx} value={d}>{d}</option>
             ))}
           </select>
@@ -709,7 +846,7 @@ export default function Resumen({
                   {categoria === 'gabinetes' || categoria === 'totems' ? (
                     <>
                       <p><strong className="text-slate-900">• Dimensiones:</strong> {item.alto || 120} cm (alto) x {item.ancho || 60} cm (ancho) x {item.fondo || 60} cm (fondo).</p>
-                      <p><strong className="text-slate-900">• Calibre y Material:</strong> Lámina {item.lamina || item.tipoLamina || 'CR'} Calibre {item.calibre || 22}.</p>
+                      <p><strong className="text-slate-900">• Calibre y Material:</strong> {item.lamina || item.tipoLamina || 'CR'}  {item.calibre}.</p>
                     </>
                   ) : (
                     <>
@@ -736,15 +873,19 @@ export default function Resumen({
                   <p><strong className="text-slate-900">• Acabado:</strong> Pintura electrostática color {item.pintura || item.detalles?.pintura || item.acabado || 'Blanco Brillante'}.</p>
                 </div>
 
-                {/* ACCESORIOS SELECCIONADOS (MOSTRAR ÚNICA Y EXCLUSIVAMENTE LO DEVUELTO POR LA API) */}
+                {/* ACCESORIOS SELECCIONADOS (MOSTRAR NOMBRE ACTUALIZADO DEL CATÁLOGO) */}
                 {accesoriosLimpios.length > 0 && (
                   <div className="bg-white border border-slate-200 p-2 rounded-lg text-[10px] space-y-0.5">
                     <span className="font-bold text-slate-700 block">Otros Accesorios:</span>
-                    {accesoriosLimpios.map((acc, aIdx) => (
-                      <p key={aIdx} className="text-slate-600 pl-1 border-l-2 border-amber-400">
-                        • {acc.nombre || acc.descripcion} (x{acc.cantidad || 1})
-                      </p>
-                    ))}
+                    {accesoriosLimpios.map((acc, aIdx) => {
+                      const accMaestro = accesorios.find(a => String(a.id) === String(acc.id || acc.codigo));
+                      const nombreFinal = accMaestro?.nombre || acc.nombre || acc.descripcion || 'Accesorio';
+                      return (
+                        <p key={aIdx} className="text-slate-600 pl-1 border-l-2 border-amber-400">
+                          • {nombreFinal} (x{acc.cantidad || 1})
+                        </p>
+                      );
+                    })}
                   </div>
                 )}
 

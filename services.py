@@ -3,7 +3,7 @@ import models
 from sqlalchemy.orm import Session
 
 from pricing_laminas import obtener_precio_cm2_lamina
-from pricing_tubos import calcular_area_postes
+from pricing_tubos import calcular_area_postes, calcular_desglose_brazo_parametrico
 from pricing_accesorios import calcular_costo_accesorios_bd
 from pricing_complementos import calcular_costo_complementos_bd
 from pricing_totems import calcular_precio_totem
@@ -28,17 +28,38 @@ def calcular_item_cotizacion(categoria: str, params: dict, nivel_precio: int, db
     es_brazo = "brazo" in cat_limpia or "brazos" in cat_limpia
 
     cubicaje_m3 = 0.0
+    desglose_brazo = None
 
     # PURGA DE CLAVES DE COMPLEMENTOS PARÁSITOS EN BRAZOS
     if es_brazo:
         params.pop("brazosMontados", None)
         params.pop("brazos_lista", None)
         params.pop("complementos", None)
+        desglose_brazo = calcular_desglose_brazo_parametrico(params, db)
 
     if cat_lower in ["postes", "brazos"] or es_brazo:
         tramos = params.get("tramos", [])
-        area_tubo_m2, costo_material, diametro_tubo_principal = calcular_area_postes(tramos, db)
-        medidas_texto = f"{int(params.get('alto', 150))} cm"
+        area_tubo_m2, costo_material, diametro_tubo_principal = calcular_area_postes(
+            tramos, db, params if es_brazo else None
+        )
+        if es_brazo and desglose_brazo:
+            area_tubo_m2 += desglose_brazo["area_varilla_m2"]
+            t_brazo = desglose_brazo["tipo_brazo"]
+            if t_brazo in ["T", "T_BILATERAL"]:
+                med_total = int(desglose_brazo["longitud_saliente_cm"] + desglose_brazo["longitud_travesano_cm"])
+                medidas_texto = (
+                    f"Brazo T: Saliente {int(desglose_brazo['longitud_saliente_cm'])} cm + "
+                    f"Travesaño {int(desglose_brazo['longitud_travesano_cm'])} cm ({med_total} cm)"
+                )
+            elif desglose_brazo["pie_amigo_activo"]:
+                medidas_texto = (
+                    f"{int(desglose_brazo['longitud_saliente_cm'])} cm + "
+                    f"Pie de Amigo {desglose_brazo['longitud_varilla_cm']:.1f} cm"
+                )
+            else:
+                medidas_texto = f"{int(params.get('alto', 150))} cm"
+        else:
+            medidas_texto = f"{int(params.get('alto', 150))} cm"
     else:
         alto_cm = float(params.get("alto") or params.get("alto_cm") or 100)
         ancho_cm = float(params.get("ancho") or params.get("ancho_cm") or 50)
@@ -62,45 +83,79 @@ def calcular_item_cotizacion(categoria: str, params: dict, nivel_precio: int, db
     # -------------------------------------------------------------------------
     valores_invalidos = ["", "none", "null", "sin_buje", "sin buje", "ninguno", "0", "undefined", None]
     
-    # 1.1 Leer accesorios manuales
+    # 1.1 Leer accesorios manuales (excluyendo caperuza/videoportero de brazo que se liquidan con tarifa fija)
     raw_acc_ids = list(params.get("accesoriosSeleccionados") or params.get("accesorios_lista") or [])
     acc_ids_manuales = []
     for a in raw_acc_ids:
         a_id = a.get("id") if isinstance(a, dict) else a
         if a_id and str(a_id).strip().lower() not in valores_invalidos:
+            a_lower = str(a_id).strip().lower()
+            if es_brazo and ("caperuza" in a_lower or "cubre-anclaje" in a_lower or "videoportero" in a_lower):
+                continue
             if a_id not in acc_ids_manuales:
                 acc_ids_manuales.append(a_id)
 
-    # 1.1b Opciones directas de caperuza y videoportero en brazos
-    if params.get("caperuzaBase") or params.get("cubreAnclaje") or params.get("caperuza"):
-        if not any("caperuza" in str(a).lower() or "cubre" in str(a).lower() for a in acc_ids_manuales):
-            acc_ids_manuales.append("Caperuza / Cubre-anclaje Embellecedora")
+    tiene_caperuza_brazo = bool(
+        params.get("tieneCaperuza") or
+        params.get("caperuzaEmbellecedora") or
+        params.get("caperuzaBase") or
+        params.get("cubreAnclaje") or
+        params.get("caperuza")
+    )
+    tiene_videoportero_brazo = bool(
+        params.get("tieneVideoportero") or
+        params.get("accesorioVideoportero") or
+        params.get("videoporteroPunta") or
+        params.get("soporteVideoportero") or
+        params.get("accesorioPunta") == "videoportero"
+    )
 
-    if params.get("videoporteroPunta") or params.get("soporteVideoportero") or params.get("accesorioPunta") == "videoportero":
-        if not any("videoportero" in str(a).lower() or "portero" in str(a).lower() for a in acc_ids_manuales):
-            acc_ids_manuales.append("Soporte Caja Videoportero en Punta")
+    # 1.2 Extraer bujes (separando buje base vs buje final/cámaras para multiplicar por cantidadCamaras)
+    buje_inicial_raw = (
+        params.get("bujeInicialId") or params.get("bujeBaseId") or 
+        params.get("bujeInicial") or params.get("bujeBase") or params.get("buje_inicial_id")
+    )
+    if isinstance(buje_inicial_raw, dict):
+        buje_inicial_raw = buje_inicial_raw.get("id") or buje_inicial_raw.get("nombre")
+    if buje_inicial_raw and str(buje_inicial_raw).strip().lower() in valores_invalidos:
+        buje_inicial_raw = None
 
-    # 1.2 Extraer bujes
+    buje_final_raw = (
+        params.get("bujeFinalId") or params.get("bujePuntaId") or 
+        params.get("bujeFinal") or params.get("bujePunta") or params.get("buje_final_id")
+    )
+    if isinstance(buje_final_raw, dict):
+        buje_final_raw = buje_final_raw.get("id") or buje_final_raw.get("nombre")
+    if buje_final_raw and str(buje_final_raw).strip().lower() in valores_invalidos:
+        buje_final_raw = None
+
+    cantidad_camaras_brazo = desglose_brazo["cantidad_camaras"] if (es_brazo and desglose_brazo) else 1
+
     bujes_detectados = []
-    claves_bujes = [
-        "bujeInicialId", "bujeFinalId", "bujeBaseId", "bujePuntaId", 
-        "bujeBase", "bujeFinal", "bujeInicial", "buje_inicial_id", "buje_final_id"
-    ]
+    cantidades_bujes = {}
 
-    for k in claves_bujes:
-        val_b = params.get(k)
-        if isinstance(val_b, dict):
-            val_b = val_b.get("id") or val_b.get("nombre")
-        if val_b and str(val_b).strip().lower() not in valores_invalidos:
-            if val_b not in bujes_detectados:
-                bujes_detectados.append(val_b)
+    if buje_inicial_raw:
+        key_ini = str(buje_inicial_raw).strip()
+        bujes_detectados.append(key_ini)
+        cantidades_bujes[key_ini.lower()] = 1
 
+    if buje_final_raw:
+        key_fin = str(buje_final_raw).strip()
+        if key_fin.lower() in cantidades_bujes:
+            cantidades_bujes[key_fin.lower()] += cantidad_camaras_brazo
+        else:
+            bujes_detectados.append(key_fin)
+            cantidades_bujes[key_fin.lower()] = cantidad_camaras_brazo
+
+    # Fallback para otros bujes en bujesSeleccionados que no estén ya contabilizados
     bujes_list_raw = params.get("bujesSeleccionados") or []
     for item_b in bujes_list_raw:
         item_id = item_b.get("id") if isinstance(item_b, dict) else item_b
         if item_id and str(item_id).strip().lower() not in valores_invalidos:
-            if item_id not in bujes_detectados:
-                bujes_detectados.append(item_id)
+            k_str = str(item_id).strip()
+            if k_str.lower() not in cantidades_bujes:
+                bujes_detectados.append(k_str)
+                cantidades_bujes[k_str.lower()] = 1
 
     cantidades_acc = dict(params.get("cantidadesAcc", {}))
     detalles_acc = dict(params.get("detallesAccesorios", {}))
@@ -115,33 +170,107 @@ def calcular_item_cotizacion(categoria: str, params: dict, nivel_precio: int, db
     if bujes_detectados:
         try:
             todos_bujes = db.query(models.Buje).all()
-            bujes_db = []
-            for b in todos_bujes:
-                for b_det in bujes_detectados:
-                    b_det_str = str(b_det).strip().lower()
+            for b_det in bujes_detectados:
+                b_det_str = str(b_det).strip().lower()
+                cant_b = cantidades_bujes.get(b_det_str, 1)
+                buje_match = None
+                for b in todos_bujes:
                     if str(b.id) == b_det_str or b.nombre.strip().lower() == b_det_str:
-                        if b not in bujes_db: bujes_db.append(b)
+                        buje_match = b
                         break
-                    # Coincidencia por slug o palabras clave
                     slug = b.nombre.strip().lower().replace(" ", "_").replace("(", "").replace(")", "").replace("/", "_")
                     if b_det_str in slug or slug in b_det_str:
-                        if b not in bujes_db: bujes_db.append(b)
+                        buje_match = b
                         break
 
-            
-            for b in bujes_db:
-                # Lectura de precio segura contra errores de esquema
-                precio_b = getattr(b, 'precio', getattr(b, 'precio_venta', getattr(b, 'costo', 15000.0)))
-                lista_bujes_base.append({
-                    "id": f"buje_{b.id}",
-                    "nombre": f"Buje: {b.nombre}",
-                    "cantidad": 1,
-                    "costo_unitario": float(precio_b or 0.0),
-                    "total_item": float(precio_b or 0.0),
-                    "es_fijo": True
-                })
+                if buje_match:
+                    precio_b = float(
+                        getattr(buje_match, 'precio', getattr(buje_match, 'precio_venta', getattr(buje_match, 'costo', 15000.0))) or 0.0
+                    )
+                    lista_bujes_base.append({
+                        "id": f"buje_{buje_match.id}",
+                        "nombre": f"Buje: {buje_match.nombre}",
+                        "cantidad": cant_b,
+                        "costo_unitario": precio_b,
+                        "total_item": precio_b * cant_b,
+                        "es_fijo": True
+                    })
+                elif b_det_str in ["platina_redonda", "platina_cuadrada", "videoportero_punta"]:
+                    precio_fb = 45000.0 if "videoportero" in b_det_str else 22000.0
+                    nom_fb = "Soporte Videoportero en Punta" if "videoportero" in b_det_str else b_det.replace("_", " ").title()
+                    lista_bujes_base.append({
+                        "id": f"buje_{b_det_str}",
+                        "nombre": f"Buje: {nom_fb}",
+                        "cantidad": cant_b,
+                        "costo_unitario": precio_fb,
+                        "total_item": precio_fb * cant_b,
+                        "es_fijo": True
+                    })
         except Exception as err_bujes:
             print(f"[Advertencia] Error al consultar bujes en BD: {err_bujes}")
+
+    # B.2 ÍTEMS PARAMÉTRICOS ADICIONALES DEL BRAZO (Pie de Amigo, Soldaduras, Platinas Intermedias)
+    lista_extras_brazo = []
+    if es_brazo and desglose_brazo:
+        # 1. Varilla / Perfil de refuerzo diagonal ("Pie de amigo")
+        if desglose_brazo["pie_amigo_activo"] and desglose_brazo["costo_varilla_base"] > 0:
+            lista_extras_brazo.append({
+                "id": "varilla_pie_amigo",
+                "nombre": (
+                    f"Tensor Pie de Amigo ({desglose_brazo['nombre_varilla']} - "
+                    f"L={desglose_brazo['longitud_varilla_cm']:.1f} cm)"
+                ),
+                "cantidad": 1,
+                "costo_unitario": desglose_brazo["costo_varilla_base"],
+                "total_item": desglose_brazo["costo_varilla_base"],
+                "es_fijo": False  # Aplica margen sobre el material del perfil/varilla
+            })
+
+        # 2. Soldadura adicional en unión T (1 unión adicional en inglete o boca de pescado)
+        if desglose_brazo["uniones_t"] > 0:
+            unit_t = desglose_brazo["costo_soldadura_t"] / desglose_brazo["uniones_t"]
+            lista_extras_brazo.append({
+                "id": "soldadura_union_t",
+                "nombre": "Soldadura Unión en T (Boca de pescado / Inglete)",
+                "cantidad": desglose_brazo["uniones_t"],
+                "costo_unitario": unit_t,
+                "total_item": desglose_brazo["costo_soldadura_t"],
+                "es_fijo": True
+            })
+
+        # 3. Puntos de soldadura en Pie de Amigo (2 puntos: platina mural y tubo)
+        if desglose_brazo["puntos_soldadura_pie"] > 0:
+            unit_pie = desglose_brazo["costo_soldadura_pie"] / desglose_brazo["puntos_soldadura_pie"]
+            lista_extras_brazo.append({
+                "id": "soldadura_pie_amigo",
+                "nombre": "Puntos de Soldadura Pie de Amigo (Platina y Tubo)",
+                "cantidad": desglose_brazo["puntos_soldadura_pie"],
+                "costo_unitario": unit_pie,
+                "total_item": desglose_brazo["costo_soldadura_pie"],
+                "es_fijo": True
+            })
+
+        # 4. Caperuza / Cubre-anclaje Embellecedora (+ $25.000)
+        if tiene_caperuza_brazo:
+            lista_extras_brazo.append({
+                "id": "caperuza_embellecedora",
+                "nombre": "Caperuza / Cubre-anclaje Embellecedora",
+                "cantidad": 1,
+                "costo_unitario": 25000.0,
+                "total_item": 25000.0,
+                "es_fijo": True
+            })
+
+        # 5. Accesorio Videoportero en Punta de Brazo (+ $45.000)
+        if tiene_videoportero_brazo:
+            lista_extras_brazo.append({
+                "id": "accesorio_videoportero_punta",
+                "nombre": "Accesorio Videoportero en Punta de Brazo",
+                "cantidad": 1,
+                "costo_unitario": 45000.0,
+                "total_item": 45000.0,
+                "es_fijo": True
+            })
 
     # C. Complementos adicionales
     if es_brazo:
@@ -151,7 +280,7 @@ def calcular_item_cotizacion(categoria: str, params: dict, nivel_precio: int, db
 
     # D. Unificar componentes (SOLO UNA VEZ)
     area_acc_m2 += area_comp_m2
-    lista_todos_componentes = lista_acc_base + lista_bujes_base + lista_complementos_base
+    lista_todos_componentes = lista_acc_base + lista_bujes_base + lista_extras_brazo + lista_complementos_base
 
     accesorios_venta = []
     costo_accesorios_total_venta = 0.0
@@ -160,7 +289,7 @@ def calcular_item_cotizacion(categoria: str, params: dict, nivel_precio: int, db
         nom_lower = str(item.get("nombre", "")).lower()
         id_lower = str(item.get("id", "")).lower()
         
-        # RESPETAR PRECIO FIJO EN BUJES, ROSITAS, BASES Y ACCESORIOS FIJOS
+        # RESPETAR PRECIO FIJO EN BUJES, ROSETAS, BASES, SOLDADURAS Y ACCESORIOS FIJOS
         es_fijo_o_buje = (
             item.get("es_fijo", False) or 
             "buje" in nom_lower or "buje" in id_lower or 
@@ -325,7 +454,7 @@ def calcular_item_cotizacion(categoria: str, params: dict, nivel_precio: int, db
 
     precio_venta_final = costo_material_venta + costo_pintura_venta + costo_accesorios_venta
 
-    return {
+    respuesta = {
         "costo_base": round(costo_material + costo_pintura_base, 2),
         "costoEstructura": costo_material_venta,
         "costo_lamina_venta": costo_material_venta,
@@ -340,3 +469,7 @@ def calcular_item_cotizacion(categoria: str, params: dict, nivel_precio: int, db
         "medidas_texto": medidas_texto,
         "accesorios_lista": accesorios_venta
     }
+    if desglose_brazo:
+        respuesta["desglose_brazo"] = desglose_brazo
+
+    return respuesta

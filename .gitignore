@@ -19,3 +19,5 @@ __pycache__/
 # Planos generados / descargables
 generated_plans/
 *.zip
+venv/
+.env

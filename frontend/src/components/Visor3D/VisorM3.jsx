@@ -266,25 +266,71 @@ const VisorM3 = forwardRef(({
 
       const listaBrazos = paramsNormalizados.brazos || paramsNormalizados.brazosAdicionales || [];
       if (listaBrazos.length > 0) {
-        let alturaCuboM = 1.5;
-        if (Array.isArray(limitesTramos) && limitesTramos.length > 0 && limitesTramos[0]?.yMax) {
-          alturaCuboM = limitesTramos[0].yMax;
+        let alturaDefectoM = 1.5;
+        if (Array.isArray(limitesTramos) && limitesTramos.length > 0) {
+          alturaDefectoM = limitesTramos[0]?.superior || limitesTramos[0]?.yMax || 1.5;
         }
 
-        let radioPosteMetros = 0.038;
-        try {
-          const tramo0 = paramsNormalizados?.tramos?.[0] || {};
-          if (typeof obtenerPulgadasTubo === 'function') {
-            const pulg = obtenerPulgadasTubo(tramo0);
-            if (pulg) radioPosteMetros = (parseFloat(pulg) * 0.0254) / 2;
+        let radioPosteMetros = limitesTramos?.[0]?.radioM || 0.038;
+        if (!limitesTramos?.[0]?.radioM) {
+          try {
+            if (typeof obtenerPulgadasTubo === 'function') {
+              const med = obtenerPulgadasTubo(0);
+              if (med) {
+                radioPosteMetros = esCuadrado
+                  ? (parseFloat(med) / 100) / 2
+                  : (parseFloat(med) * 0.0254) / 2;
+              }
+            }
+          } catch (e) {
+            console.warn('No se pudo calcular el radio exacto, usando default:', e);
           }
-        } catch (e) {
-          console.warn('No se pudo calcular el radio exacto, usando default:', e);
         }
 
         const offsetExterior = radioPosteMetros + 0.015;
 
         listaBrazos.forEach((brazo) => {
+          const alturaBrazoM = brazo.alturaAnclajeCm || brazo.alturaAnclaje || brazo.altura
+            ? (parseFloat(brazo.alturaAnclajeCm ?? brazo.alturaAnclaje ?? brazo.altura) / 100)
+            : alturaDefectoM;
+          const rotDeg = parseFloat(brazo.rotacionDeg ?? brazo.rotacion ?? 0);
+          const rotacionRad = (rotDeg * Math.PI) / 180;
+
+          const tieneTramosParametricos = Array.isArray(brazo.tramos) && brazo.tramos.length > 0;
+          if (tieneTramosParametricos || (!brazo.archivo_glb && !brazo.archivoGlb && (brazo.tipoPerfil || brazo.forma || brazo.seccion))) {
+            const tramosBrazoPoste = tieneTramosParametricos
+              ? brazo.tramos
+              : [{
+                  id: 1,
+                  alto: brazo.largo || brazo.longitud || 60,
+                  longitud: brazo.largo || brazo.longitud || 60,
+                  angulo: brazo.angulo ?? 90,
+                  forma: brazo.forma || brazo.tipoPerfil || brazo.seccion || (esCuadrado ? 'cuadrado' : 'redondo'),
+                  diametro: brazo.diametro || 2,
+                  ancho_cm: brazo.ancho || brazo.ancho_cm || 4,
+                  alto_cm: brazo.alto || brazo.alto_cm || 4,
+                  medida: brazo.medida || brazo.nombre || ''
+                }];
+
+            const brazoParamGroup = buildBrazo(
+              {
+                ...brazo,
+                orientacion: 'suelo',
+                colorPintura: paramsNormalizados.colorPintura,
+                tramos: tramosBrazoPoste
+              },
+              tubos,
+              accesorios,
+              loader
+            );
+
+            brazoParamGroup.position.set(0, alturaBrazoM, 0);
+            brazoParamGroup.rotation.y = rotacionRad;
+            brazoParamGroup.translateX(offsetExterior);
+            scene.add(brazoParamGroup);
+            return;
+          }
+
           let nombreArchivo = brazo.archivo_glb || brazo.archivoGlb || 'PTZganzoC18.glb';
           if (!nombreArchivo.startsWith('/models/') && !nombreArchivo.startsWith('http')) {
             nombreArchivo = `/models/${nombreArchivo}`;
@@ -295,10 +341,7 @@ const VisorM3 = forwardRef(({
             (gltf) => {
               const brazoMesh = gltf.scene;
 
-              const rotDeg = parseFloat(brazo.rotacionDeg ?? brazo.rotacion ?? 0);
-              const rotacionRad = (rotDeg * Math.PI) / 180;
-
-              brazoMesh.position.set(0, alturaCuboM, 0);
+              brazoMesh.position.set(0, alturaBrazoM, 0);
               brazoMesh.rotation.y = rotacionRad;
               brazoMesh.translateX(offsetExterior);
 
