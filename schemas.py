@@ -64,11 +64,52 @@ class GuardarCotizacionReq(BaseModel):
 # =====================================================================
 # MULTI-DISTRIBUIDOR: AUTENTICACIÓN, USUARIOS Y PERFIL DEL DISTRIBUIDOR
 # =====================================================================
+import json
 from pydantic import Field, field_validator
 from typing import Literal
 
-Rol = Literal["SUPERADMIN", "DISTRIBUIDOR"]
+Rol = Literal["SUPERADMIN", "DISTRIBUIDOR", "VENDEDOR_WG"]
 TipoPersonal = Literal["ASESOR", "DISENADOR"]
+
+MODULOS_PERMITIDOS = (
+    "gabinetes",
+    "totems",
+    "postes",
+    "brazos",
+    "videoportero",
+    "historial",
+    "admin_precios",
+)
+
+PERMISOS_MODULOS_DEFECTO: Dict[str, bool] = {
+    "gabinetes": True,
+    "totems": True,
+    "postes": True,
+    "brazos": True,
+    "videoportero": True,
+    "historial": True,
+    "admin_precios": False,
+}
+
+
+def normalizar_permisos_modulos(raw: Any = None, rol: str = "VENDEDOR_WG") -> Dict[str, bool]:
+    """Devuelve un dict completo y tipado de permisos por módulo."""
+    if rol == "SUPERADMIN":
+        return {k: True for k in MODULOS_PERMITIDOS}
+    base = dict(PERMISOS_MODULOS_DEFECTO)
+    if rol == "DISTRIBUIDOR":
+        return base
+    datos = raw
+    if isinstance(raw, str):
+        try:
+            datos = json.loads(raw)
+        except Exception:
+            datos = {}
+    if isinstance(datos, dict):
+        for k in MODULOS_PERMITIDOS:
+            if k in datos:
+                base[k] = bool(datos[k])
+    return base
 
 
 class LoginRequest(BaseModel):
@@ -84,6 +125,9 @@ class TokenResponse(BaseModel):
     username: str
     rol: Rol
     distribuidor_id: Optional[int] = None
+    personal_id: Optional[int] = None
+    personal_nombre: Optional[str] = None
+    permisos_modulos: Dict[str, bool] = Field(default_factory=lambda: dict(PERMISOS_MODULOS_DEFECTO))
 
 
 class UsuarioActual(BaseModel):
@@ -92,10 +136,17 @@ class UsuarioActual(BaseModel):
     username: str
     rol: Rol
     distribuidor_id: Optional[int] = None
+    personal_id: Optional[int] = None
+    personal_nombre: Optional[str] = None
+    permisos_modulos: Dict[str, bool] = Field(default_factory=lambda: dict(PERMISOS_MODULOS_DEFECTO))
 
     @property
     def es_superadmin(self) -> bool:
         return self.rol == "SUPERADMIN"
+
+    @property
+    def es_vendedor_wg(self) -> bool:
+        return self.rol == "VENDEDOR_WG"
 
 
 class PersonalBase(BaseModel):
@@ -182,6 +233,15 @@ class UsuarioCreate(BaseModel):
     password: str = Field(min_length=8, max_length=128)
     rol: Rol = "DISTRIBUIDOR"
     distribuidor_id: Optional[int] = None
+    personal_id: Optional[int] = None
+    permisos_modulos: Optional[Dict[str, bool]] = None
+
+
+class UsuarioUpdate(BaseModel):
+    personal_id: Optional[int] = None
+    permisos_modulos: Optional[Dict[str, bool]] = None
+    activo: Optional[bool] = None
+    password: Optional[str] = Field(default=None, min_length=8, max_length=128)
 
 
 class UsuarioOut(BaseModel):
@@ -189,6 +249,9 @@ class UsuarioOut(BaseModel):
     username: str
     rol: Rol
     distribuidor_id: Optional[int] = None
+    personal_id: Optional[int] = None
+    personal_nombre: Optional[str] = None
+    permisos_modulos: Dict[str, bool] = Field(default_factory=lambda: dict(PERMISOS_MODULOS_DEFECTO))
     activo: bool
     model_config = {"from_attributes": True}
 

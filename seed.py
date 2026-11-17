@@ -120,7 +120,7 @@ def sembrar_datos(db=None):
                 {"nombre": "Ruedas Industriales (Juego x4)", "precio": 15000, "categorias": "gabinetes", "requiere_lamina": False, "permite_n_pies": False, "grupo_exclusion": None},
                 {"nombre": "Parales Traseros de Rack", "precio": 25000, "categorias": "gabinetes", "requiere_lamina": False, "permite_n_pies": False, "grupo_exclusion": None},
                 {"nombre": "Caperuza / Cubre-anclaje Embellecedora", "precio": 25000, "categorias": "postes,brazos", "requiere_lamina": False, "permite_n_pies": False, "grupo_exclusion": None},
-                {"nombre": "Soporte Caja Videoportero en Punta", "precio": 45000, "categorias": "brazos,postes", "requiere_lamina": False, "permite_n_pies": False, "grupo_exclusion": None}
+                {"nombre": "Soporte Caja Videoportero en Punta", "precio": 45000, "categorias": "totems", "requiere_lamina": False, "permite_n_pies": False, "grupo_exclusion": None}
             ]
 
             for acc in accesorios_deseados:
@@ -152,8 +152,14 @@ def sembrar_datos(db=None):
                 {"nombre": "Platina Redonda", "precio": 22000, "subtipo": "base", "categorias": "brazos"},
                 {"nombre": "Platina Cuadrada", "precio": 22000, "subtipo": "base", "categorias": "brazos"},
                 {"nombre": "Buje PTZ", "precio": 22000, "subtipo": "ambos", "categorias": "brazos"},
-                {"nombre": "Soporte Videoportero en Punta", "precio": 45000, "subtipo": "punta", "categorias": "brazos"}
+                {"nombre": "Base Redonda Semiplana 15 Dim", "precio": 24000, "subtipo": "ambos", "categorias": "brazos"},
+                {"nombre": "Base Redonda Globo 15 Dim", "precio": 26000, "subtipo": "ambos", "categorias": "brazos"},
+                {"nombre": "Base Plana 20x12", "precio": 25000, "subtipo": "ambos", "categorias": "brazos"}
             ]
+
+            buje_vp_obsoleto = db.query(models.Buje).filter(models.Buje.nombre == "Soporte Videoportero en Punta").first()
+            if buje_vp_obsoleto:
+                db.delete(buje_vp_obsoleto)
 
             for buje in bujes_deseados:
                 existe = db.query(models.Buje).filter(models.Buje.nombre == buje["nombre"]).first()

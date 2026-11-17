@@ -41,6 +41,7 @@ if not JWT_SECRET_KEY:
 
 ROL_SUPERADMIN = "SUPERADMIN"
 ROL_DISTRIBUIDOR = "DISTRIBUIDOR"
+ROL_VENDEDOR_WG = "VENDEDOR_WG"
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -68,15 +69,30 @@ _DUMMY_HASH = hash_password(secrets.token_urlsafe(16))
 
 
 # ------------------------------------------------------------------------ JWT
-def crear_access_token(usuario: models.Usuario) -> tuple[str, int]:
+def _resolver_personal_nombre(db: Session, personal_id: Optional[int]) -> Optional[str]:
+    if not personal_id:
+        return None
+    p = db.get(models.PersonalDistribuidor, personal_id)
+    return p.nombre if p else None
+
+
+def crear_access_token(
+    usuario: models.Usuario,
+    personal_nombre: Optional[str] = None,
+    permisos_modulos: Optional[dict] = None,
+) -> tuple[str, int]:
     expira = timedelta(minutes=JWT_EXPIRE_MINUTES)
     ahora = datetime.now(timezone.utc)
+    permisos = permisos_modulos if permisos_modulos is not None else schemas.normalizar_permisos_modulos(usuario.permisos_modulos, usuario.rol)
     payload = {
         "sub": str(usuario.id),
         "user_id": usuario.id,
         "distribuidor_id": usuario.distribuidor_id,
+        "personal_id": usuario.personal_id,
+        "personal_nombre": personal_nombre,
         "rol": usuario.rol,
         "username": usuario.username,
+        "permisos_modulos": permisos,
         "iat": ahora,
         "exp": ahora + expira,
     }
@@ -133,6 +149,9 @@ def obtener_usuario_actual(
         username=usuario.username,
         rol=usuario.rol,
         distribuidor_id=usuario.distribuidor_id,
+        personal_id=usuario.personal_id,
+        personal_nombre=_resolver_personal_nombre(db, usuario.personal_id),
+        permisos_modulos=schemas.normalizar_permisos_modulos(usuario.permisos_modulos, usuario.rol),
     )
     request.state.usuario_actual = actual
     return actual
@@ -165,7 +184,11 @@ def politica_de_acceso(request: Request, usuario: schemas.UsuarioActual) -> None
         if usuario.rol != ROL_SUPERADMIN:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Se requiere rol SUPERADMIN")
     elif partes[0] in CATALOGOS_COSTOS and request.method not in ("GET", "HEAD", "OPTIONS"):
-        if usuario.rol != ROL_SUPERADMIN:
+        puede_admin_precios = (
+            usuario.rol == ROL_SUPERADMIN
+            or (usuario.rol == ROL_VENDEDOR_WG and usuario.permisos_modulos.get("admin_precios", False))
+        )
+        if not puede_admin_precios:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo la fábrica puede modificar costos base")
 
 
@@ -191,8 +214,8 @@ def obtener_fabrica(db: Session) -> models.Distribuidor:
 
 def resolver_distribuidor_id(usuario: schemas.UsuarioActual, db: Session, solicitado: Optional[int] = None) -> int:
     """Distribuidor sobre el que opera el usuario.
-    DISTRIBUIDOR: siempre el suyo (se ignora `solicitado`). SUPERADMIN: `solicitado` o la fábrica."""
-    if usuario.rol == ROL_DISTRIBUIDOR:
+    DISTRIBUIDOR y VENDEDOR_WG: siempre el suyo (se ignora `solicitado`). SUPERADMIN: `solicitado` o la fábrica."""
+    if usuario.rol in (ROL_DISTRIBUIDOR, ROL_VENDEDOR_WG):
         return usuario.distribuidor_id
     return solicitado or obtener_fabrica(db).id
 
@@ -216,7 +239,9 @@ def login(datos: schemas.LoginRequest, db: Session = Depends(get_db)):
         if dist is None or not dist.activo:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Distribuidor inactivo o pendiente de aprobación")
 
-    token, expira_en = crear_access_token(usuario)
+    personal_nombre = _resolver_personal_nombre(db, usuario.personal_id)
+    permisos = schemas.normalizar_permisos_modulos(usuario.permisos_modulos, usuario.rol)
+    token, expira_en = crear_access_token(usuario, personal_nombre=personal_nombre, permisos_modulos=permisos)
     return schemas.TokenResponse(
         access_token=token,
         expires_in=expira_en,
@@ -224,6 +249,9 @@ def login(datos: schemas.LoginRequest, db: Session = Depends(get_db)):
         username=usuario.username,
         rol=usuario.rol,
         distribuidor_id=usuario.distribuidor_id,
+        personal_id=usuario.personal_id,
+        personal_nombre=personal_nombre,
+        permisos_modulos=permisos,
     )
 
 

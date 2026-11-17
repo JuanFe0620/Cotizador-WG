@@ -29,19 +29,22 @@ class Distribuidor(Base):
 class Usuario(Base):
     __tablename__ = "usuarios"
     __table_args__ = (
-        CheckConstraint("rol IN ('SUPERADMIN', 'DISTRIBUIDOR')", name="ck_usuarios_rol"),
-        # Un usuario DISTRIBUIDOR siempre pertenece a un distribuidor.
+        CheckConstraint("rol IN ('SUPERADMIN', 'DISTRIBUIDOR', 'VENDEDOR_WG')", name="ck_usuarios_rol"),
+        # Un usuario DISTRIBUIDOR o VENDEDOR_WG siempre pertenece a un distribuidor (fábrica en el caso de VENDEDOR_WG).
         CheckConstraint("rol = 'SUPERADMIN' OR distribuidor_id IS NOT NULL", name="ck_usuarios_distribuidor"),
     )
 
     id = Column(Integer, primary_key=True, index=True)
     distribuidor_id = Column(Integer, ForeignKey("distribuidores.id"), nullable=True, index=True)
+    personal_id = Column(Integer, ForeignKey("personal_distribuidor.id", ondelete="SET NULL"), nullable=True, index=True)
     username = Column(String, unique=True, index=True, nullable=False)
     password_hash = Column(String, nullable=False)
-    rol = Column(String, nullable=False, default="DISTRIBUIDOR")  # SUPERADMIN | DISTRIBUIDOR
+    rol = Column(String, nullable=False, default="DISTRIBUIDOR")  # SUPERADMIN | DISTRIBUIDOR | VENDEDOR_WG
+    permisos_modulos = Column(Text, nullable=True)  # JSON con permisos granulares por módulo
     activo = Column(Boolean, nullable=False, default=True)
 
     distribuidor = relationship("Distribuidor", back_populates="usuarios")
+    personal = relationship("PersonalDistribuidor", foreign_keys=[personal_id])
 
 
 class PersonalDistribuidor(Base):
@@ -164,6 +167,7 @@ class BrazoGuardado(Base):
     __tablename__ = "brazos_guardados"
 
     id = Column(Integer, primary_key=True, index=True)
+    distribuidor_id = Column(Integer, ForeignKey("distribuidores.id"), nullable=True, index=True)
     nombre = Column(String, nullable=False)            # Ej: "Brazo Doble Ángulo 90-45"
     tubo_id = Column(Integer, ForeignKey("tubos.id"), nullable=True)
     
@@ -171,6 +175,7 @@ class BrazoGuardado(Base):
     tramos_json = Column(Text, nullable=False)         
     
     buje_inicial_id = Column(Integer, nullable=True)  # Anclaje Base
+    configuracion_json = Column(Text, nullable=True)   # Parámetros adicionales (tipoBrazo, bujes, pintura, etc.)
     buje_final_id = Column(Integer, nullable=True)    # Carga Salida
     
     desarrollo_total_m = Column(Float, default=0.0)    # Longitud total lineal de tuberia

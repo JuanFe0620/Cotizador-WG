@@ -3,7 +3,7 @@ import { Plus, Trash2, RefreshCw } from 'lucide-react';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
-export default function SelectorBrazosPoste({ params = {}, setParams, accesorios = [] }) {
+export default function SelectorBrazosPoste({ params = {}, setParams, accesorios = [], modoCliente = false }) {
   const [incluir, setIncluir] = useState(Boolean(params.incluirBrazoPoste));
   const [brazosDisponibles, setBrazosDisponibles] = useState([]);
   const [brazoSeleccionadoId, setBrazoSeleccionadoId] = useState('');
@@ -26,16 +26,43 @@ export default function SelectorBrazosPoste({ params = {}, setParams, accesorios
     setErrorBD(false);
 
     try {
-      const res = await fetch(`${API_BASE_URL}/api/brazos`);
-      if (!res.ok) throw new Error(`HTTP Error ${res.status}`);
+      const [resEstandar, resGuardados] = await Promise.allSettled([
+        fetch(`${API_BASE_URL}/api/brazos`),
+        fetch(`${API_BASE_URL}/api/brazos-guardados`)
+      ]);
 
-      const data = await res.json();
-      const lista = Array.isArray(data) ? data : (data.brazos || []);
+      let listaEstandar = [];
+      if (resEstandar.status === 'fulfilled' && resEstandar.value.ok) {
+        const data = await resEstandar.value.json();
+        const raw = Array.isArray(data) ? data : (data.brazos || []);
+        listaEstandar = raw.map((b) => ({
+          ...b,
+          uid: String(b.id ?? b.codigo),
+          esPersonalizado: false
+        }));
+      }
 
+      let listaPersonalizados = [];
+      if (resGuardados.status === 'fulfilled' && resGuardados.value.ok) {
+        const dataG = await resGuardados.value.json();
+        const rawG = Array.isArray(dataG) ? dataG : [];
+        listaPersonalizados = rawG.map((bg) => ({
+          ...bg,
+          uid: bg.uid || `guardado_${bg.id}`,
+          esPersonalizado: true,
+          precio: parseFloat(bg.costo_total ?? bg.precio ?? 0) || 0
+        }));
+      }
+
+      if (resEstandar.status !== 'fulfilled' && resGuardados.status !== 'fulfilled') {
+        throw new Error('No se pudo consultar /api/brazos');
+      }
+
+      const lista = [...listaEstandar, ...listaPersonalizados];
       setBrazosDisponibles(lista);
 
       if (lista.length > 0 && !brazoSeleccionadoId) {
-        setBrazoSeleccionadoId(String(lista[0].id ?? lista[0].codigo));
+        setBrazoSeleccionadoId(String(lista[0].uid));
       }
       return lista;
     } catch (err) {
@@ -62,9 +89,34 @@ export default function SelectorBrazosPoste({ params = {}, setParams, accesorios
 
     const altNum = parseFloat(alt) || 0;
     const rotNum = parseFloat(rot) || 0;
+    const cfg = objBrazo.configuracion || {};
+
+    if (objBrazo.esPersonalizado || (Array.isArray(objBrazo.tramos) && objBrazo.tramos.length > 0)) {
+      return {
+        ...cfg,
+        id: objBrazo.uid || `guardado_${objBrazo.id}`,
+        brazoGuardadoId: objBrazo.id,
+        esPersonalizado: true,
+        nombre: objBrazo.nombre || 'Brazo Personalizado',
+        tuboId: objBrazo.tubo_id ?? objBrazo.tuboId ?? null,
+        tramos: objBrazo.tramos || [],
+        bujeInicialId: objBrazo.buje_inicial_id ?? cfg.bujeInicialId ?? '',
+        bujeInicial: cfg.bujeInicial || null,
+        bujeFinalId: objBrazo.buje_final_id ?? cfg.bujeFinalId ?? '',
+        bujeFinal: cfg.bujeFinal || null,
+        configuracion: cfg,
+        alturaAnclajeCm: altNum,
+        alturaAnclaje: altNum,
+        altura: altNum,
+        rotacionDeg: rotNum,
+        rotacion: rotNum,
+        precio: parseFloat(objBrazo.costo_total ?? objBrazo.precio) || 0
+      };
+    }
 
     return {
       id: objBrazo.id ?? objBrazo.codigo,
+      esPersonalizado: false,
       nombre: objBrazo.nombre || 'Brazo Salida',
       archivo_glb: rutaGlb,
       archivoGlb: rutaGlb,
@@ -112,7 +164,7 @@ export default function SelectorBrazosPoste({ params = {}, setParams, accesorios
     if (brazosDisponibles.length === 0) return;
 
     const objBrazo = brazosDisponibles.find(
-      (b) => String(b.id ?? b.codigo) === String(brazoSeleccionadoId)
+      (b) => String(b.uid ?? b.id ?? b.codigo) === String(brazoSeleccionadoId)
     ) || brazosDisponibles[0];
 
     if (!objBrazo) return;
@@ -124,6 +176,26 @@ export default function SelectorBrazosPoste({ params = {}, setParams, accesorios
     setParams((prev) => ({
       ...prev,
       incluirBrazoPoste: true,
+      brazosAdicionales: nuevaLista,
+      brazos: nuevaLista,
+    }));
+  };
+
+  const handleActualizarBrazo = (index, campo, valor) => {
+    const numVal = valor === '' ? 0 : (parseFloat(valor) || 0);
+    const nuevaLista = brazosAgregados.map((item, idx) => {
+      if (idx !== index) return item;
+      if (campo === 'altura') {
+        return { ...item, alturaAnclajeCm: numVal, alturaAnclaje: numVal, altura: numVal };
+      }
+      if (campo === 'rotacion') {
+        return { ...item, rotacionDeg: numVal, rotacion: numVal };
+      }
+      return item;
+    });
+
+    setParams((prev) => ({
+      ...prev,
       brazosAdicionales: nuevaLista,
       brazos: nuevaLista,
     }));
@@ -180,18 +252,40 @@ export default function SelectorBrazosPoste({ params = {}, setParams, accesorios
               className="w-full bg-white border border-slate-300 rounded-lg p-2 text-slate-800 outline-none focus:ring-2 focus:ring-blue-500 font-medium text-xs disabled:bg-slate-100"
             >
               {cargando ? (
-                <option value="">Cargando registros desde SQLite...</option>
+                <option value="">Cargando registros desde BD...</option>
               ) : errorBD ? (
                 <option value="">Error al consultar /api/brazos</option>
               ) : brazosDisponibles.length > 0 ? (
-                brazosDisponibles.map((b) => {
-                  const val = String(b.id ?? b.codigo);
-                  return (
-                    <option key={val} value={val}>
-                      {b.nombre} (${Number(b.precio).toLocaleString()})
-                    </option>
-                  );
-                })
+                <>
+                  {brazosDisponibles.some((b) => !b.esPersonalizado) && (
+                    <optgroup label="Brazos Estándar">
+                      {brazosDisponibles
+                        .filter((b) => !b.esPersonalizado)
+                        .map((b) => {
+                          const val = String(b.uid ?? b.id ?? b.codigo);
+                          return (
+                            <option key={val} value={val}>
+                              {b.nombre}{!modoCliente && b.precio ? ` ($${Number(b.precio).toLocaleString()})` : ''}
+                            </option>
+                          );
+                        })}
+                    </optgroup>
+                  )}
+                  {brazosDisponibles.some((b) => b.esPersonalizado) && (
+                    <optgroup label="Mis Brazos Personalizados">
+                      {brazosDisponibles
+                        .filter((b) => b.esPersonalizado)
+                        .map((b) => {
+                          const val = String(b.uid ?? `guardado_${b.id}`);
+                          return (
+                            <option key={val} value={val}>
+                              ★ {b.nombre}{!modoCliente && b.precio ? ` ($${Number(b.precio).toLocaleString()})` : ''}
+                            </option>
+                          );
+                        })}
+                    </optgroup>
+                  )}
+                </>
               ) : (
                 <option value="">La tabla 'brazos' está vacía en la BD</option>
               )}
@@ -246,25 +340,45 @@ export default function SelectorBrazosPoste({ params = {}, setParams, accesorios
               <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
                 Brazos Montados en Poste ({brazosAgregados.length}):
               </span>
-              <div className="space-y-1">
+              <div className="space-y-1.5">
                 {brazosAgregados.map((item, idx) => (
                   <div
                     key={idx}
-                    className="flex items-center justify-between bg-white p-2 rounded-lg border border-slate-200 text-[11px]"
+                    className="bg-white p-2 rounded-lg border border-slate-200 text-[11px] space-y-1.5"
                   >
-                    <div>
-                      <span className="font-semibold text-slate-800">{item.nombre}</span>
-                      <span className="text-slate-500 ml-2">
-                        Alt: {item.alturaAnclajeCm ?? item.alturaAnclaje ?? item.altura}cm | Rot: {item.rotacionDeg ?? item.rotacion}°
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold text-slate-800 truncate">
+                        {item.esPersonalizado ? `★ ${item.nombre}` : item.nombre}
                       </span>
+                      <button
+                        type="button"
+                        onClick={() => handleEliminarBrazo(idx)}
+                        className="text-red-500 hover:text-red-700 p-1 rounded transition shrink-0"
+                        title="Quitar brazo del poste"
+                      >
+                        <Trash2 size={14} />
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => handleEliminarBrazo(idx)}
-                      className="text-red-500 hover:text-red-700 p-1 rounded transition"
-                    >
-                      <Trash2 size={14} />
-                    </button>
+                    <div className="grid grid-cols-2 gap-2">
+                      <label className="flex items-center justify-between gap-1 bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5 text-[10px] text-slate-600">
+                        <span>Alt (cm):</span>
+                        <input
+                          type="number"
+                          value={item.alturaAnclajeCm ?? item.alturaAnclaje ?? item.altura ?? 0}
+                          onChange={(e) => handleActualizarBrazo(idx, 'altura', e.target.value)}
+                          className="w-14 bg-white border border-slate-300 rounded px-1 py-0.5 text-center font-mono text-[10px] text-slate-800 outline-none focus:ring-1 focus:ring-blue-500"
+                        />
+                      </label>
+                      <label className="flex items-center justify-between gap-1 bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5 text-[10px] text-slate-600">
+                        <span>Rot (°):</span>
+                        <input
+                          type="number"
+                          value={item.rotacionDeg ?? item.rotacion ?? 0}
+                          onChange={(e) => handleActualizarBrazo(idx, 'rotacion', e.target.value)}
+                          className="w-14 bg-white border border-slate-300 rounded px-1 py-0.5 text-center font-mono text-[10px] text-slate-800 outline-none focus:ring-1 focus:ring-blue-500"
+                        />
+                      </label>
+                    </div>
                   </div>
                 ))}
               </div>

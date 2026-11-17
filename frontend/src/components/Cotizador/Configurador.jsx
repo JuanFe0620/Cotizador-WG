@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus } from 'lucide-react';
+import { Plus, BookmarkPlus } from 'lucide-react';
 import SelectorPintura from './configurador/SelectorPintura';
 import SelectorTramos from './configurador/SelectorTramos';
 import SelectorBujes from './configurador/SelectorBujes';
@@ -7,12 +7,15 @@ import SelectorBrazosPoste from './configurador/SelectorBrazosPoste';
 import BaseAnclaje from './configurador/BaseAnclaje';
 import ListaAccesorios from './configurador/ListaAccesorios';
 import ConfiguradorTotem from './configurador/ConfiguradorTotem';
+import { calcularCostosBrazoParametrico } from '../../utils/costeoBrazos';
 
-const API_BASE_URL = "http://localhost:8000";
+const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 export default function Configurador({ 
   categoriaSel, 
   setCategoriaSel, 
+  categoriasPermitidas = ['totems', 'postes', 'brazos', 'gabinetes'],
+  permiteVideoportero = true,
   params, 
   setParams, 
   laminas = [], 
@@ -20,6 +23,8 @@ export default function Configurador({
   pinturas = [], 
   accesorios = [], 
   bujes: propBujes = [],
+  nivelPrecio = 1,
+  modoCliente = false,
   handleAgregar,
   cargando = false
 }) {
@@ -33,6 +38,9 @@ export default function Configurador({
   const [usarPersonalizada, setUsarPersonalizada] = useState(params.usarPersonalizada || false);
   const [incluirPlatina, setIncluirPlatina] = useState((esGabinete || esBrazo) ? false : (params.incluirBase ?? true));
   const [platinaMedida, setPlatinaMedida] = useState(params.ladoBase || params.platinaLargo || 20);
+  const [nombreBrazoPersonalizado, setNombreBrazoPersonalizado] = useState('');
+  const [guardandoBrazo, setGuardandoBrazo] = useState(false);
+  const [msgBrazoGuardado, setMsgBrazoGuardado] = useState(null);
   const [laminaAnclajeId, setLaminaAnclajeId] = useState(params.laminaAnclajeId || '');
   const [ubicacion, setUbicacion] = useState(params.ubicacion || (esBrazo ? 'suspendido' : 'suelo'));
   
@@ -120,6 +128,7 @@ export default function Configurador({
       alto: esNuevoTotem ? 150 : '',
       ancho: esNuevoTotem ? 25 : '',
       fondo: esNuevoTotem ? 15 : '',
+      tipoGabinete: 'estandar',
       ...(esNuevoTotem && {
         alto_cm: 150,
         ancho_cm: 25,
@@ -492,10 +501,100 @@ export default function Configurador({
     handleAgregar(payloadFinal);
   };
 
+  const handleGuardarBrazoPersonalizado = async () => {
+    const nombreLimpio = nombreBrazoPersonalizado.trim();
+    const tramosActuales = Array.isArray(params.tramos) ? params.tramos : [];
+    if (!nombreLimpio) {
+      setMsgBrazoGuardado({ tipo: 'error', texto: 'Ingresa un nombre para guardar el brazo.' });
+      return;
+    }
+    if (tramosActuales.length === 0) {
+      setMsgBrazoGuardado({ tipo: 'error', texto: 'Agrega al menos un tramo al brazo antes de guardarlo.' });
+      return;
+    }
+
+    setGuardandoBrazo(true);
+    setMsgBrazoGuardado(null);
+
+    try {
+      const esBrazoT = params.tipoBrazo === 'T' || params.tipoBrazo === 'T_BILATERAL';
+      const lonTravesanoCm = esBrazoT ? (parseFloat(params.longitudTravesanoT ?? 50) || 0) : 0;
+      const desarrolloCm = tramosActuales.reduce((acc, t) => acc + (parseFloat(t.alto || t.longitud || 0)), 0) + lonTravesanoCm;
+      const desarrolloTotalM = Number((desarrolloCm / 100).toFixed(3));
+      const cantidadDobleces = Math.max(0, tramosActuales.length - 1);
+
+      const costeo = calcularCostosBrazoParametrico(params, tubos, bujes, nivelPrecio);
+      let costoTotal = Number(costeo?.total || 0);
+      if (params.tieneCaperuza) costoTotal += 25000;
+      if (params.tieneVideoportero || params.accesorioVideoportero || params.videoporteroPunta || params.soporteVideoportero) {
+        costoTotal += 45000;
+      }
+
+      const bujeInicialObj = params.bujeInicial || bujes.find(b => String(b.id) === String(params.bujeInicialId)) || null;
+      const bujeFinalObj = params.bujeFinal || bujes.find(b => String(b.id) === String(params.bujeFinalId)) || null;
+
+      const payload = {
+        nombre: nombreLimpio,
+        tubo_id: tramosActuales[0]?.tuboId ? Number(tramosActuales[0].tuboId) || null : null,
+        tramos: tramosActuales,
+        buje_inicial_id: params.bujeInicialId || null,
+        buje_final_id: params.bujeFinalId || null,
+        desarrollo_total_m: desarrolloTotalM,
+        cantidad_dobleces: cantidadDobleces,
+        costo_total: Math.round(costoTotal),
+        configuracion: {
+          tipoBrazo: params.tipoBrazo || 'SIMPLE_L',
+          longitudTravesanoT: params.longitudTravesanoT || 50,
+          conPieDeAmigo: Boolean(params.conPieDeAmigo),
+          tieneCaperuza: Boolean(params.tieneCaperuza),
+          tieneVideoportero: Boolean(
+            params.tieneVideoportero || params.accesorioVideoportero || params.videoporteroPunta || params.soporteVideoportero
+          ),
+          accesorioPunta: params.accesorioPunta || '',
+          bujeInicialId: params.bujeInicialId || '',
+          bujeInicial: bujeInicialObj,
+          bujeFinalId: params.bujeFinalId || '',
+          bujeFinal: bujeFinalObj,
+          bujesSeleccionados: params.bujesSeleccionados || [],
+          accesoriosSeleccionados: params.accesoriosSeleccionados || [],
+          colorPintura: params.colorPintura || '#2563eb',
+          nombrePintura: params.nombrePintura || ''
+        }
+      };
+
+      const res = await fetch(`${API_BASE_URL}/api/brazos-guardados`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || `Error HTTP ${res.status}`);
+      }
+
+      setNombreBrazoPersonalizado('');
+      setMsgBrazoGuardado({ tipo: 'ok', texto: `Brazo "${nombreLimpio}" guardado en Mis Brazos.` });
+    } catch (err) {
+      setMsgBrazoGuardado({ tipo: 'error', texto: err.message || 'No se pudo guardar el brazo.' });
+    } finally {
+      setGuardandoBrazo(false);
+    }
+  };
+
   return (
     <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-4 text-xs shadow-sm">
-      <div className="grid grid-cols-4 gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
-        {['totems', 'postes', 'brazos', 'gabinetes'].map(cat => (
+      {categoriasPermitidas.length === 0 ? (
+        <div className="p-4 text-center text-slate-500 bg-slate-50 rounded-xl border border-slate-200">
+          No tienes módulos de cotización habilitados. Contacta al administrador.
+        </div>
+      ) : (
+      <>
+      <div
+        className="grid gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200"
+        style={{ gridTemplateColumns: `repeat(${categoriasPermitidas.length}, minmax(0, 1fr))` }}
+      >
+        {categoriasPermitidas.map(cat => (
           <button
             key={cat}
             onClick={() => cambiarCategoria(cat)}
@@ -551,6 +650,41 @@ export default function Configurador({
 
             {esGabinete && (
               <>
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5 space-y-1.5">
+                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                    Tipo de Estructura
+                  </span>
+                  <div className="grid grid-cols-2 gap-1.5 bg-slate-200/70 p-1 rounded-lg">
+                    <button
+                      type="button"
+                      onClick={() => setParams(prev => ({ ...prev, tipoGabinete: 'estandar' }))}
+                      className={`py-1.5 px-2 rounded-md text-[11px] font-semibold transition ${
+                        (params.tipoGabinete || 'estandar') === 'estandar'
+                          ? 'bg-white text-blue-600 shadow-sm'
+                          : 'text-slate-600 hover:text-slate-800'
+                      }`}
+                    >
+                      Gabinete Estándar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setParams(prev => ({ ...prev, tipoGabinete: 'cofre_exteriores', tipoPuerta: 'normal' }))}
+                      className={`py-1.5 px-2 rounded-md text-[11px] font-semibold transition ${
+                        params.tipoGabinete === 'cofre_exteriores'
+                          ? 'bg-white text-orange-600 shadow-sm'
+                          : 'text-slate-600 hover:text-slate-800'
+                      }`}
+                    >
+                      Cofre Exteriores (NEMA)
+                    </button>
+                  </div>
+                  {params.tipoGabinete === 'cofre_exteriores' && (
+                    <p className="text-[10px] text-orange-700 bg-orange-50 border border-orange-200 rounded-lg px-2 py-1 leading-snug">
+                      Incluye techo/visera voladiza, marco vierteaguas, puerta ciega con chapa cromada y bandeja interna desmontable naranja.
+                    </p>
+                  )}
+                </div>
+
                 <div>
                   <label className="text-[11px] font-medium text-slate-700 block mb-1">Tipo de Lámina:</label>
                   <select 
@@ -611,15 +745,48 @@ export default function Configurador({
                   params={params} 
                   setParams={setParams} 
                   tubos={tubos} 
-                  categoriaSel={categoriaSel} 
+                  categoriaSel={categoriaSel}
+                  modoCliente={modoCliente}
                 />
 
                 {esBrazo && (
-                  <SelectorBujes
-                    params={params}
-                    setParams={setParams}
-                    bujes={bujes}
-                  />
+                  <>
+                    <SelectorBujes
+                      params={params}
+                      setParams={setParams}
+                      bujes={bujes}
+                      modoCliente={modoCliente}
+                    />
+
+                    <div className="p-3 bg-indigo-50/70 border border-indigo-200 rounded-xl space-y-2">
+                      <span className="font-bold text-indigo-800 uppercase block text-[10px] tracking-wider">
+                        Guardar Brazo en Catálogo / Mis Brazos
+                      </span>
+                      <div className="flex gap-1.5">
+                        <input
+                          type="text"
+                          value={nombreBrazoPersonalizado}
+                          onChange={(e) => setNombreBrazoPersonalizado(e.target.value)}
+                          placeholder="Ej. Brazo Tipo L 80cm + Videoportero"
+                          className="flex-1 bg-white border border-indigo-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleGuardarBrazoPersonalizado}
+                          disabled={guardandoBrazo}
+                          className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white font-semibold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1 transition shadow-sm shrink-0"
+                        >
+                          <BookmarkPlus size={14} />
+                          <span>{guardandoBrazo ? 'Guardando...' : 'Guardar'}</span>
+                        </button>
+                      </div>
+                      {msgBrazoGuardado && (
+                        <p className={`text-[11px] font-medium ${msgBrazoGuardado.tipo === 'ok' ? 'text-emerald-700' : 'text-red-600'}`}>
+                          {msgBrazoGuardado.texto}
+                        </p>
+                      )}
+                    </div>
+                  </>
                 )}
 
                 {esPoste && (
@@ -627,6 +794,7 @@ export default function Configurador({
                     params={params}
                     setParams={setParams}
                     accesorios={accesorios}
+                    modoCliente={modoCliente}
                   />
                 )}
               </div>
@@ -638,6 +806,7 @@ export default function Configurador({
             setParams={setParams} 
             pinturas={pinturas} 
             category={categoriaSel}
+            modoCliente={modoCliente}
           />
 
           {!esGabinete && !esBrazo && (
@@ -704,6 +873,8 @@ export default function Configurador({
           {cargando ? 'Enviando al Backend...' : 'Añadir a la Cotización'}
         </button>
       </div>
+      </>
+      )}
     </div>
   );
 }

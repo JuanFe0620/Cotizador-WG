@@ -21,3 +21,6 @@ generated_plans/
 *.zip
 venv/
 .env
+
+__pycache__/
+*.pyc

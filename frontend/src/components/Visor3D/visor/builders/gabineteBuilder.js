@@ -31,7 +31,252 @@ export const obtenerRutaModeloGabinete = (altoCm, fondoCm) => {
   }
 };
 
+export const construirCofreExteriores = ({ params, matGenerico, scene }) => {
+  const altoUsuario = parseFloat(params?.alto || params?.altoTotalCm || params?.detalles?.alto || params?.altoGabinete) || 90;
+  const anchoUsuario = parseFloat(params?.ancho || params?.detalles?.ancho || params?.anchoGabinete) || 60;
+  const fondoUsuario = parseFloat(params?.fondo || params?.detalles?.fondo || params?.fondoGabinete) || 60;
+
+  const H = altoUsuario / 100;
+  const W = anchoUsuario / 100;
+  const D = fondoUsuario / 100;
+  const t = Math.min(0.004, Math.max(0.0025, Math.min(W, H, D) * 0.012));
+
+  const grupoCofre = new THREE.Group();
+  grupoCofre.name = 'modeloCofreExteriores';
+
+  // 1. CUERPO PRINCIPAL (Caja metálica cerrada por lados, fondo, base y techo)
+  const geoFondo = new THREE.BoxGeometry(W, H, t);
+  const meshFondo = new THREE.Mesh(geoFondo, matGenerico);
+  meshFondo.position.set(0, H / 2, -D / 2 + t / 2);
+
+  const geoLateral = new THREE.BoxGeometry(t, H, D);
+  const meshIzq = new THREE.Mesh(geoLateral, matGenerico);
+  meshIzq.position.set(-W / 2 + t / 2, H / 2, 0);
+
+  const meshDer = new THREE.Mesh(geoLateral, matGenerico);
+  meshDer.position.set(W / 2 - t / 2, H / 2, 0);
+
+  const geoTapa = new THREE.BoxGeometry(W, t, D);
+  const meshBase = new THREE.Mesh(geoTapa, matGenerico);
+  meshBase.position.set(0, t / 2, 0);
+
+  const meshTechoBase = new THREE.Mesh(geoTapa, matGenerico);
+  meshTechoBase.position.set(0, H - t / 2, 0);
+
+  grupoCofre.add(meshFondo, meshIzq, meshDer, meshBase, meshTechoBase);
+
+  // 2. MARCO FRONTAL CON PESTAÑA VIERTEAGUAS (Canaleta perimetral contra lluvia)
+  const flangeW = Math.min(0.022, Math.min(W, H) * 0.08);
+  const flangeD = 0.012;
+  const zFlange = D / 2 - flangeD / 2;
+
+  const marcoSup = new THREE.Mesh(new THREE.BoxGeometry(W, flangeW, flangeD), matGenerico);
+  marcoSup.position.set(0, H - flangeW / 2, zFlange);
+
+  const marcoInf = new THREE.Mesh(new THREE.BoxGeometry(W, flangeW, flangeD), matGenerico);
+  marcoInf.position.set(0, flangeW / 2, zFlange);
+
+  const marcoIzq = new THREE.Mesh(new THREE.BoxGeometry(flangeW, H - 2 * flangeW, flangeD), matGenerico);
+  marcoIzq.position.set(-W / 2 + flangeW / 2, H / 2, zFlange);
+
+  const marcoDer = new THREE.Mesh(new THREE.BoxGeometry(flangeW, H - 2 * flangeW, flangeD), matGenerico);
+  marcoDer.position.set(W / 2 - flangeW / 2, H / 2, zFlange);
+
+  // Labio vierteaguas hundido hacia el interior (canaleta perimetral)
+  const matCanaleta = new THREE.MeshStandardMaterial({
+    color: 0x1e293b,
+    metalness: 0.45,
+    roughness: 0.65
+  });
+  const labioW = 0.008;
+  const labioD = 0.014;
+  const zLabio = D / 2 - flangeD - labioD / 2 + 0.004;
+
+  const labioSup = new THREE.Mesh(new THREE.BoxGeometry(W - 2 * flangeW + 0.006, labioW, labioD), matCanaleta);
+  labioSup.position.set(0, H - flangeW - labioW / 2 + 0.003, zLabio);
+
+  const labioInf = new THREE.Mesh(new THREE.BoxGeometry(W - 2 * flangeW + 0.006, labioW, labioD), matCanaleta);
+  labioInf.position.set(0, flangeW + labioW / 2 - 0.003, zLabio);
+
+  const labioIzq = new THREE.Mesh(new THREE.BoxGeometry(labioW, H - 2 * flangeW, labioD), matCanaleta);
+  labioIzq.position.set(-W / 2 + flangeW + labioW / 2 - 0.003, H / 2, zLabio);
+
+  const labioDer = new THREE.Mesh(new THREE.BoxGeometry(labioW, H - 2 * flangeW, labioD), matCanaleta);
+  labioDer.position.set(W / 2 - flangeW - labioW / 2 + 0.003, H / 2, zLabio);
+
+  grupoCofre.add(marcoSup, marcoInf, marcoIzq, marcoDer, labioSup, labioInf, labioIzq, labioDer);
+
+  // 3. TECHO / CAPOTA VOLADIZA SUPERIOR (Visera con doblez perimetral hacia abajo ~1.8 cm)
+  const overhangFront = Math.min(0.045, D * 0.18);
+  const overhangSide = Math.min(0.022, W * 0.06);
+  const overhangBack = 0.006;
+  const visorW = W + 2 * overhangSide;
+  const visorD = D + overhangFront + overhangBack;
+  const visorCenterZ = (overhangFront - overhangBack) / 2;
+  const doblezH = 0.018;
+  const visorT = 0.0035;
+
+  const grupoVisera = new THREE.Group();
+  grupoVisera.name = 'techo_visera_voladiza';
+
+  const tapaVisera = new THREE.Mesh(new THREE.BoxGeometry(visorW, visorT, visorD), matGenerico);
+  tapaVisera.position.set(0, H + visorT / 2 + 0.002, visorCenterZ);
+
+  const doblezFront = new THREE.Mesh(new THREE.BoxGeometry(visorW, doblezH, visorT), matGenerico);
+  doblezFront.position.set(0, H + 0.002 - doblezH / 2 + visorT, visorCenterZ + visorD / 2 - visorT / 2);
+
+  const doblezIzq = new THREE.Mesh(new THREE.BoxGeometry(visorT, doblezH, visorD), matGenerico);
+  doblezIzq.position.set(-visorW / 2 + visorT / 2, H + 0.002 - doblezH / 2 + visorT, visorCenterZ);
+
+  const doblezDer = new THREE.Mesh(new THREE.BoxGeometry(visorT, doblezH, visorD), matGenerico);
+  doblezDer.position.set(visorW / 2 - visorT / 2, H + 0.002 - doblezH / 2 + visorT, visorCenterZ);
+
+  const doblezBack = new THREE.Mesh(new THREE.BoxGeometry(visorW, doblezH * 0.65, visorT), matGenerico);
+  doblezBack.position.set(0, H + 0.002 - (doblezH * 0.65) / 2 + visorT, visorCenterZ - visorD / 2 + visorT / 2);
+
+  grupoVisera.add(tapaVisera, doblezFront, doblezIzq, doblezDer, doblezBack);
+  grupoCofre.add(grupoVisera);
+
+  // 4. BANDEJA / PLACA DE MONTAJE INTERNA (Fondo falso naranja industrial #D9530F)
+  const matBandeja = new THREE.MeshStandardMaterial({
+    color: 0xd9530f,
+    metalness: 0.25,
+    roughness: 0.45
+  });
+  const matMetal = new THREE.MeshStandardMaterial({
+    color: 0xcbd5e1,
+    metalness: 0.85,
+    roughness: 0.25
+  });
+
+  const marginBandeja = Math.min(0.035, Math.min(W, H) * 0.08);
+  const bandejaW = Math.max(0.08, W - 2 * marginBandeja);
+  const bandejaH = Math.max(0.08, H - 2 * marginBandeja);
+  const separacionFondo = Math.min(0.022, D * 0.12);
+  const bandejaZ = -D / 2 + t + separacionFondo;
+
+  const grupoBandeja = new THREE.Group();
+  grupoBandeja.name = 'bandeja_montaje_naranja';
+
+  const placaBandeja = new THREE.Mesh(new THREE.BoxGeometry(bandejaW, bandejaH, 0.003), matBandeja);
+  placaBandeja.position.set(0, H / 2, bandejaZ);
+  grupoBandeja.add(placaBandeja);
+
+  // Dobleces laterales de refuerzo en la bandeja
+  const doblezBandejaGeo = new THREE.BoxGeometry(0.003, bandejaH, 0.012);
+  const doblezBandejaIzq = new THREE.Mesh(doblezBandejaGeo, matBandeja);
+  doblezBandejaIzq.position.set(-bandejaW / 2 + 0.0015, H / 2, bandejaZ - 0.006);
+  const doblezBandejaDer = new THREE.Mesh(doblezBandejaGeo, matBandeja);
+  doblezBandejaDer.position.set(bandejaW / 2 - 0.0015, H / 2, bandejaZ - 0.006);
+  grupoBandeja.add(doblezBandejaIzq, doblezBandejaDer);
+
+  // 4 Separadores y tornillos de fijación al fondo
+  const offsetSepX = bandejaW / 2 - Math.min(0.02, bandejaW * 0.1);
+  const offsetSepY = bandejaH / 2 - Math.min(0.02, bandejaH * 0.1);
+  const geoSeparador = new THREE.CylinderGeometry(0.006, 0.006, separacionFondo, 12);
+  geoSeparador.rotateX(Math.PI / 2);
+  const geoTornillo = new THREE.CylinderGeometry(0.005, 0.005, 0.004, 12);
+  geoTornillo.rotateX(Math.PI / 2);
+
+  [
+    [-offsetSepX, H / 2 + offsetSepY],
+    [offsetSepX, H / 2 + offsetSepY],
+    [-offsetSepX, H / 2 - offsetSepY],
+    [offsetSepX, H / 2 - offsetSepY]
+  ].forEach(([sx, sy]) => {
+    const sep = new THREE.Mesh(geoSeparador, matMetal);
+    sep.position.set(sx, sy, -D / 2 + t + separacionFondo / 2);
+    const tornillo = new THREE.Mesh(geoTornillo, matMetal);
+    tornillo.position.set(sx, sy, bandejaZ + 0.003);
+    grupoBandeja.add(sep, tornillo);
+  });
+
+  grupoCofre.add(grupoBandeja);
+
+  // 5. PUERTA BATIENTE CIEGA (BISAGRAS DERECHAS) + CHAPA CROMADA (LADO IZQUIERDO)
+  const grupoPuerta = new THREE.Group();
+  grupoPuerta.name = 'grupo_puerta_cofre';
+  const puertaW = W - 0.006;
+  const puertaH = H - 0.006;
+  grupoPuerta.position.set(W / 2 - 0.003, 0, D / 2 + 0.002);
+
+  const puertaAbierta = params?.puertaAbierta !== false;
+  grupoPuerta.rotation.y = puertaAbierta ? THREE.MathUtils.degToRad(40) : 0;
+
+  const panelPuerta = new THREE.Mesh(new THREE.BoxGeometry(puertaW, puertaH, 0.003), matGenerico);
+  panelPuerta.position.set(-puertaW / 2, H / 2, 0);
+  grupoPuerta.add(panelPuerta);
+
+  // Caja / doblez perimetral de refuerzo interno de la puerta
+  const refuerzoAncho = 0.015;
+  const refuerzoProf = 0.011;
+  const margenRef = 0.016;
+  const refZ = -refuerzoProf / 2 - 0.001;
+
+  const refSup = new THREE.Mesh(new THREE.BoxGeometry(puertaW - 2 * margenRef, refuerzoAncho, refuerzoProf), matGenerico);
+  refSup.position.set(-puertaW / 2, H - 0.003 - margenRef - refuerzoAncho / 2, refZ);
+
+  const refInf = new THREE.Mesh(new THREE.BoxGeometry(puertaW - 2 * margenRef, refuerzoAncho, refuerzoProf), matGenerico);
+  refInf.position.set(-puertaW / 2, 0.003 + margenRef + refuerzoAncho / 2, refZ);
+
+  const refIzq = new THREE.Mesh(new THREE.BoxGeometry(refuerzoAncho, puertaH - 2 * margenRef, refuerzoProf), matGenerico);
+  refIzq.position.set(-puertaW + margenRef + refuerzoAncho / 2, H / 2, refZ);
+
+  const refDer = new THREE.Mesh(new THREE.BoxGeometry(refuerzoAncho, puertaH - 2 * margenRef, refuerzoProf), matGenerico);
+  refDer.position.set(-margenRef - refuerzoAncho / 2, H / 2, refZ);
+
+  grupoPuerta.add(refSup, refInf, refIzq, refDer);
+
+  // Bisagras laterales en el lado derecho
+  const posicionesBisagrasY = H >= 0.8 ? [H * 0.15, H * 0.5, H * 0.85] : [H * 0.18, H * 0.82];
+  const geoBisagra = new THREE.CylinderGeometry(0.005, 0.005, 0.03, 12);
+  posicionesBisagrasY.forEach((by) => {
+    const bisagra = new THREE.Mesh(geoBisagra, matMetal);
+    bisagra.position.set(0.002, by, 0.001);
+    grupoPuerta.add(bisagra);
+  });
+
+  // Chapa cilíndrica cromada tipo moneda/llave en el costado izquierdo medio
+  const matCromo = new THREE.MeshStandardMaterial({
+    color: 0xf8fafc,
+    metalness: 0.95,
+    roughness: 0.12
+  });
+  const chapaX = -puertaW + Math.min(0.042, puertaW * 0.12);
+  const chapaY = H * 0.5;
+
+  const grupoChapa = new THREE.Group();
+  grupoChapa.name = 'chapa_cromada_cofre';
+  grupoChapa.position.set(chapaX, chapaY, 0.003);
+
+  const biselGeo = new THREE.CylinderGeometry(0.015, 0.016, 0.005, 24);
+  biselGeo.rotateX(Math.PI / 2);
+  const bisel = new THREE.Mesh(biselGeo, matCromo);
+
+  const cilindroGeo = new THREE.CylinderGeometry(0.01, 0.01, 0.008, 24);
+  cilindroGeo.rotateX(Math.PI / 2);
+  const cilindro = new THREE.Mesh(cilindroGeo, matCromo);
+  cilindro.position.z = 0.003;
+
+  const ranura = new THREE.Mesh(new THREE.BoxGeometry(0.0025, 0.012, 0.002), matCanaleta);
+  ranura.position.z = 0.007;
+
+  const levaTrasera = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.008, 0.003), matMetal);
+  levaTrasera.position.set(-0.008, 0, -0.014);
+
+  grupoChapa.add(bisel, cilindro, ranura, levaTrasera);
+  grupoPuerta.add(grupoChapa);
+
+  grupoCofre.add(grupoPuerta);
+  scene.add(grupoCofre);
+
+  return { altoGabinete: altoUsuario };
+};
+
 export const construirGabinete = ({ loader, params, matGenerico, scene }) => {
+  if (params?.tipoGabinete === 'cofre_exteriores') {
+    return construirCofreExteriores({ params, matGenerico, scene });
+  }
   const altoUsuario = parseFloat(params?.alto || params?.altoTotalCm || params?.detalles?.alto || params?.altoGabinete) || 90;
   const anchoUsuario = parseFloat(params?.ancho || params?.detalles?.ancho || params?.anchoGabinete) || 60;
   const fondoUsuario = parseFloat(params?.fondo || params?.detalles?.fondo || params?.fondoGabinete) || 60;

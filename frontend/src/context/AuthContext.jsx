@@ -5,9 +5,46 @@ import {
 
 const AuthContext = createContext(null);
 
+const PERMISOS_DEFAULT = {
+  gabinetes: true,
+  totems: true,
+  postes: true,
+  brazos: true,
+  videoportero: true,
+  historial: true,
+  admin_precios: false,
+};
+
+const normalizarPermisos = (raw, rol) => {
+  if (rol === 'SUPERADMIN') {
+    return {
+      gabinetes: true,
+      totems: true,
+      postes: true,
+      brazos: true,
+      videoportero: true,
+      historial: true,
+      admin_precios: true,
+    };
+  }
+  if (rol === 'DISTRIBUIDOR') {
+    return { ...PERMISOS_DEFAULT };
+  }
+  return { ...PERMISOS_DEFAULT, ...(raw && typeof raw === 'object' ? raw : {}) };
+};
+
 const usuarioDesdeToken = (token) => {
   const p = decodificarJwt(token);
-  return p ? { id: p.user_id, username: p.username, rol: p.rol, distribuidor_id: p.distribuidor_id ?? null } : null;
+  if (!p) return null;
+  return {
+    id: p.user_id,
+    username: p.username,
+    rol: p.rol,
+    distribuidor_id: p.distribuidor_id ?? null,
+    personal_id: p.personal_id ?? null,
+    personal_nombre: p.personal_nombre ?? null,
+    permisos_modulos: normalizarPermisos(p.permisos_modulos, p.rol),
+  };
 };
 
 export function AuthProvider({ children }) {
@@ -25,10 +62,25 @@ export function AuthProvider({ children }) {
   }, []);
 
   const cargarPerfil = useCallback(async () => {
-    const res = await fetch(`${API_BASE_URL}/api/distribuidor/mi-perfil`);
-    if (!res.ok) throw new Error('No se pudo cargar el perfil');
-    const data = await res.json();
+    const [resPerfil, resMe] = await Promise.all([
+      fetch(`${API_BASE_URL}/api/distribuidor/mi-perfil`),
+      fetch(`${API_BASE_URL}/api/auth/me`),
+    ]);
+    if (!resPerfil.ok) throw new Error('No se pudo cargar el perfil');
+    const data = await resPerfil.json();
     setPerfil(data);
+    if (resMe.ok) {
+      const me = await resMe.json();
+      setUser({
+        id: me.id,
+        username: me.username,
+        rol: me.rol,
+        distribuidor_id: me.distribuidor_id ?? null,
+        personal_id: me.personal_id ?? null,
+        personal_nombre: me.personal_nombre ?? null,
+        permisos_modulos: normalizarPermisos(me.permisos_modulos, me.rol),
+      });
+    }
     return data;
   }, []);
 
@@ -98,6 +150,8 @@ export function AuthProvider({ children }) {
     user, token, perfil, cargando,
     esSuperAdmin: user?.rol === 'SUPERADMIN',
     esDistribuidor: user?.rol === 'DISTRIBUIDOR',
+    esVendedorWG: user?.rol === 'VENDEDOR_WG',
+    permisosModulos: normalizarPermisos(user?.permisos_modulos, user?.rol),
     login, logout, actualizarPerfil,
   }), [user, token, perfil, cargando, login, logout, actualizarPerfil]);
 

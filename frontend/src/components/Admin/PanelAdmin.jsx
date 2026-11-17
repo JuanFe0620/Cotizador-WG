@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Layers, Box, Wrench, Palette, CircleDot, Cpu, Building2 } from 'lucide-react';
+import { Shield, Layers, Box, Wrench, Palette, CircleDot, Cpu, Building2, Users } from 'lucide-react';
 
 import TabTubos from './TabTubos';
 import TabAccesorios from './TabAccesorios';
@@ -8,10 +8,12 @@ import TabPinturas from './TabPinturas';
 import TabBujes from './TabBujes';
 import TabMecanizadosTotem from './TabMecanizadosTotem';
 import TabDistribuidores from './TabDistribuidores';
+import TabUsuariosWG from './TabUsuariosWG';
 
 export default function PanelAdmin({ 
   API_BASE_URL,
   recargarDatos,
+  esSuperAdmin = true,
   laminas = [], setLaminas, 
   tubos = [], setTubos, 
   accesorios = [], setAccesorios,
@@ -492,21 +494,36 @@ export default function PanelAdmin({
           >
             <Palette size={13} className="inline mr-1" /> Pinturas
           </button>
-          <button 
-            onClick={() => cambiarPestana('distribuidores')} 
-            className={`px-3 py-1 rounded-md font-semibold transition-all duration-150 ${
-              tabAdmin === 'distribuidores' 
-                ? 'bg-white text-blue-600 shadow-sm border border-gray-200/60 font-bold' 
-                : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200/50'
-            }`}
-          >
-            <Building2 size={13} className="inline mr-1" /> Distribuidores
-          </button>
+          {esSuperAdmin && (
+            <>
+              <button 
+                onClick={() => cambiarPestana('distribuidores')} 
+                className={`px-3 py-1 rounded-md font-semibold transition-all duration-150 ${
+                  tabAdmin === 'distribuidores' 
+                    ? 'bg-white text-blue-600 shadow-sm border border-gray-200/60 font-bold' 
+                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200/50'
+                }`}
+              >
+                <Building2 size={13} className="inline mr-1" /> Distribuidores
+              </button>
+              <button 
+                onClick={() => cambiarPestana('usuarios_wg')} 
+                className={`px-3 py-1 rounded-md font-semibold transition-all duration-150 ${
+                  tabAdmin === 'usuarios_wg' 
+                    ? 'bg-white text-blue-600 shadow-sm border border-gray-200/60 font-bold' 
+                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200/50'
+                }`}
+              >
+                <Users size={13} className="inline mr-1" /> Usuarios / Equipo WG
+              </button>
+            </>
+          )}
         </div>
       </div>
 
       {/* Renderizado de Pestañas Activas */}
-      {tabAdmin === 'distribuidores' && <TabDistribuidores API_BASE_URL={API_BASE_URL} />}
+      {esSuperAdmin && tabAdmin === 'distribuidores' && <TabDistribuidores API_BASE_URL={API_BASE_URL} />}
+      {esSuperAdmin && tabAdmin === 'usuarios_wg' && <TabUsuariosWG API_BASE_URL={API_BASE_URL} />}
       {tabAdmin === 'tubos' && (
         <TabTubos 
           tubos={tubos} nuevoTubo={nuevoTubo} setNuevoTubo={setNuevoTubo} 

@@ -35,7 +35,7 @@ def _calcular_costo_y_area_segmento_cm(longitud_cm: float, tubo, tramo_dict: dic
         getattr(tubo, "precio_tira_6m", 0) or getattr(tubo, "precio", 0) or 40000.0
     ) if tubo else 40000.0
 
-    costo_segmento = (precio_tira / 600.0) * longitud_cm * 2.0
+    costo_segmento = (precio_tira / 600.0) * longitud_cm * 1.2
     longitud_m = longitud_cm / 100.0
 
     if "cuad" in forma or "rect" in forma:

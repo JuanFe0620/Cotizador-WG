@@ -16,6 +16,8 @@ def calcular_costo_complementos_bd(params: dict, db: Session) -> tuple[list[dict
         return [], 0.0
 
     listas_posibles = (
+        params.get("brazosAdicionales") or
+        params.get("brazos") or
         params.get("brazosMontados") or 
         params.get("brazos_lista") or 
         params.get("complementos") or []
@@ -50,10 +52,19 @@ def calcular_costo_complementos_bd(params: dict, db: Session) -> tuple[list[dict
 
         if costo_unitario == 0:
             registro_bd = None
-            for modelo_name in ["Brazo", "Buje", "Accesorio", "Producto"]:
+            id_busqueda = item_id
+            es_guardado = isinstance(item_id, str) and item_id.startswith("guardado_")
+            if es_guardado:
+                try:
+                    id_busqueda = int(item_id.replace("guardado_", ""))
+                except ValueError:
+                    id_busqueda = item_id
+
+            modelos_a_buscar = ["BrazoGuardado"] if es_guardado else ["Brazo", "BrazoGuardado", "Buje", "Accesorio", "Producto"]
+            for modelo_name in modelos_a_buscar:
                 modelo = getattr(models, modelo_name, None)
-                if modelo is not None:
-                    registro_bd = db.query(modelo).filter(modelo.id == item_id).first()
+                if modelo is not None and (isinstance(id_busqueda, int) or str(id_busqueda).isdigit()):
+                    registro_bd = db.query(modelo).filter(modelo.id == int(id_busqueda)).first()
                     if registro_bd:
                         break
 

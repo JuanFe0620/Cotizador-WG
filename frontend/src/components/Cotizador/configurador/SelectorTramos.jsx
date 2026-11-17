@@ -24,7 +24,8 @@ export default function SelectorTramos({
   params = {}, 
   setParams, 
   tubos = [], 
-  categoriaSel = 'postes' 
+  categoriaSel = 'postes',
+  modoCliente = false
 }) {
   const tramos = params.tramos || [];
   const esBrazo = categoriaSel === 'brazos' || params.categoria === 'brazos';
@@ -352,7 +353,7 @@ export default function SelectorTramos({
 
                     return (
                       <option key={t.id} value={t.id}>
-                        {t.material ? `${t.material} - ` : ''}{t.calibre ? `${t.calibre} - ` : ''}{medidaTxt} - (${precioFormat}/tira)
+                        {t.material ? `${t.material} - ` : ''}{t.calibre ? `${t.calibre} - ` : ''}{medidaTxt}{!modoCliente ? ` - ($${precioFormat}/tira)` : ''}
                       </option>
                     );
                   })}

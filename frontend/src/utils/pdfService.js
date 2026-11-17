@@ -265,15 +265,9 @@ export const exportarPdfTecnico = async ({
     pdf.setFont('helvetica', 'normal');
     pdf.text(fechaStr, 160, 25);
     pdf.text(fechaVencStr, 160, 31);
+    pdf.text(fechaEntregaAproxStr, 160, 37);
 
-    // Campo Texto Editable para Fecha Aproximada de Entrega
-    const campoFechaEntrega = new pdf.AcroFormTextField();
-    campoFechaEntrega.Rect = [159, 33.5, 35, 4.5];
-    campoFechaEntrega.value = fechaEntregaAproxStr;
-    campoFechaEntrega.fontSize = 6.5;
-    pdf.addField(campoFechaEntrega);
-
-    // 2. BLOQUE CLIENTE + DESPLEGABLES
+    // 2. BLOQUE CLIENTE + RESPONSABLES (TEXTO ESTÁTICO)
     pdf.setDrawColor(200, 200, 200);
     pdf.rect(14, 44, 182, 22, 'S');
 
@@ -287,17 +281,6 @@ export const exportarPdfTecnico = async ({
     pdf.text("Teléfono:", 110, 55);
     pdf.text("Diseñador:", 110, 61);
 
-    pdf.setFont('helvetica', 'normal');
-    pdf.text(clienteSeleccionado?.nombre || 'CLIENTE GENERAL / MOSTRADOR', 32, 49);
-    pdf.text(obtenerNit(clienteSeleccionado) || '222222222222', 32, 55);
-    pdf.text(clienteSeleccionado?.direccion || 'BOGOTÁ D.C.', 128, 49);
-    pdf.text(clienteSeleccionado?.telefono || '3000000000', 128, 55);
-
-    // --- LISTA DESPLEGABLE (COMBOBOX) DE VENDEDORES ---
-    const comboVendedor = new pdf.AcroFormComboBox();
-    comboVendedor.Rect = [32, 57, 75, 5];
-    comboVendedor.fontSize = 6.5;
-    
     const vendedoresLista = (vendedoresListaProp && vendedoresListaProp.length > 0) ? vendedoresListaProp : (membrete ? [vendedor || ' '] : [
       "CORTES TORRES SANDRA PATRICIA - 0013",
       "DUARTE RODRIGUEZ GUILLERMO - 0011",
@@ -307,27 +290,26 @@ export const exportarPdfTecnico = async ({
       "RAMIREZ CARRANZA NORA VIVIANA - 0016",
       "ZAPATA CARRANZA PAOLA KATHERINE - 0012"
     ]);
-
-    comboVendedor.setOptions(vendedoresLista);
-    const valorInicialVendedor = vendedoresLista.includes(vendedor) ? vendedor : vendedoresLista[0];
-    comboVendedor.value = valorInicialVendedor;
-    pdf.addField(comboVendedor);
-
-    // --- LISTA DESPLEGABLE (COMBOBOX) DE DISEÑADORES ---
-    const comboDisenador = new pdf.AcroFormComboBox();
-    comboDisenador.Rect = [128, 57, 65, 5];
-    comboDisenador.fontSize = 6.5;
+    const valorVendedor = vendedor && String(vendedor).trim()
+      ? String(vendedor).trim()
+      : (vendedoresLista[0] || '');
 
     const disenadoresLista = (disenadoresListaProp && disenadoresListaProp.length > 0) ? disenadoresListaProp : (membrete ? [disenador || ' '] : [
       "WILFRED GARCIA",
       "LINA PUELLO",
       "INGENIERÍA WG"
     ]);
+    const valorDisenador = disenador && String(disenador).trim()
+      ? String(disenador).trim()
+      : (disenadoresLista[0] || '');
 
-    comboDisenador.setOptions(disenadoresLista);
-    const valorInicialDisenador = disenadoresLista.includes(disenador) ? disenador : disenadoresLista[0];
-    comboDisenador.value = valorInicialDisenador;
-    pdf.addField(comboDisenador);
+    pdf.setFont('helvetica', 'normal');
+    pdf.text(clienteSeleccionado?.nombre || 'CLIENTE GENERAL / MOSTRADOR', 32, 49);
+    pdf.text(obtenerNit(clienteSeleccionado) || '222222222222', 32, 55);
+    pdf.text(valorVendedor, 32, 61, { maxWidth: 74 });
+    pdf.text(clienteSeleccionado?.direccion || 'BOGOTÁ D.C.', 128, 49);
+    pdf.text(clienteSeleccionado?.telefono || '3000000000', 128, 55);
+    pdf.text(valorDisenador, 128, 61, { maxWidth: 64 });
 
     // 3. TABLA DE ÍTEMS DE FABRICACIÓN
     let y = 70;
@@ -383,13 +365,32 @@ export const exportarPdfTecnico = async ({
         const fondo = item.fondo || item.detalles?.fondo || 60;
         const lamina = item.lamina || item.tipoLamina || 'CR';
         const calibre = item.calibre;
+        const esCofreExteriores =
+          item.tipoGabinete === 'cofre_exteriores' ||
+          item.params?.tipoGabinete === 'cofre_exteriores' ||
+          item.configuracion?.tipoGabinete === 'cofre_exteriores';
+
+        if (esCofreExteriores) {
+          const calTxt = calibre
+            ? (String(calibre).toLowerCase().includes('calibre') ? calibre : `Calibre ${calibre}`)
+            : 'Calibre Estándar';
+          const descCofre = `Cofre Metálico para Exteriores (Intemperie) en Lámina Cold Rolled ${calTxt}, con techo voladizo vierteaguas, puerta ciega con chapa de seguridad y bandeja interna desmontable en color naranja.`;
+          pdf.setFont('helvetica', 'bold');
+          pdf.setTextColor(60, 60, 60);
+          pdf.text("• Descripción:", 44, y);
+          pdf.setFont('helvetica', 'normal');
+          pdf.setTextColor(0, 0, 0);
+          const lineasCofre = pdf.splitTextToSize(descCofre, 120);
+          pdf.text(lineasCofre, 68, y);
+          y += lineasCofre.length * 3.8;
+        }
 
         pdf.setFont('helvetica', 'bold');
         pdf.setTextColor(60, 60, 60);
         pdf.text("• Dimensiones:", 44, y);
         pdf.setFont('helvetica', 'normal');
         pdf.setTextColor(0, 0, 0);
-        pdf.text(`Lámina ${lamina} Calibre ${calibre} - ${alto}cm (Alto) x ${ancho}cm (Ancho) x ${fondo}cm (Fondo).`, 68, y);
+        pdf.text(`Lámina ${lamina}${calibre ? ` Calibre ${calibre}` : ''} - ${alto}cm (Alto) x ${ancho}cm (Ancho) x ${fondo}cm (Fondo).`, 68, y);
         y += 4;
       } else {
         pdf.setFont('helvetica', 'bold');

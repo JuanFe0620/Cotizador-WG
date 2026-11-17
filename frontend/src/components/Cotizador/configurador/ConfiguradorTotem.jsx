@@ -4,7 +4,7 @@ import { Shield, Sliders, Layers, Settings2 } from 'lucide-react';
 export const OPCIONES_MECANIZADO_FRONTAL = [
   {
     id: 'videoportero',
-    label: 'Control de Acceso',
+    label: 'Videoportero / Control de Acceso',
     costoBase: 35000
   },
   {

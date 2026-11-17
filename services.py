@@ -2,7 +2,7 @@ import math
 import models
 from sqlalchemy.orm import Session
 
-from pricing_laminas import obtener_precio_cm2_lamina
+from pricing_laminas import obtener_precio_cm2_lamina, calcular_area_gabinete_m2
 from pricing_tubos import calcular_area_postes, calcular_desglose_brazo_parametrico
 from pricing_accesorios import calcular_costo_accesorios_bd
 from pricing_complementos import calcular_costo_complementos_bd
@@ -34,6 +34,8 @@ def calcular_item_cotizacion(categoria: str, params: dict, nivel_precio: int, db
     if es_brazo:
         params.pop("brazosMontados", None)
         params.pop("brazos_lista", None)
+        params.pop("brazosAdicionales", None)
+        params.pop("brazos", None)
         params.pop("complementos", None)
         desglose_brazo = calcular_desglose_brazo_parametrico(params, db)
 
@@ -64,6 +66,7 @@ def calcular_item_cotizacion(categoria: str, params: dict, nivel_precio: int, db
         alto_cm = float(params.get("alto") or params.get("alto_cm") or 100)
         ancho_cm = float(params.get("ancho") or params.get("ancho_cm") or 50)
         fondo_cm = float(params.get("fondo") or params.get("fondo_cm") or 30)
+        tipo_gabinete = str(params.get("tipoGabinete") or params.get("tipo_gabinete") or "estandar").strip().lower()
         
         alto_m = alto_cm / 100.0
         ancho_m = ancho_cm / 100.0
@@ -71,12 +74,13 @@ def calcular_item_cotizacion(categoria: str, params: dict, nivel_precio: int, db
         
         cubicaje_m3 = alto_m * ancho_m * fondo_m
         
-        area_tubo_m2 = 3 * ((ancho_m * alto_m) + (ancho_m * fondo_m) + (alto_m * fondo_m))
+        area_tubo_m2 = calcular_area_gabinete_m2(alto_cm, ancho_cm, fondo_cm, tipo_gabinete)
         area_gabinete_cm2 = area_tubo_m2 * 10000.0 * 2
 
         precio_cm2 = obtener_precio_cm2_lamina(lamina_id, db)
         costo_material = area_gabinete_cm2 * precio_cm2
-        medidas_texto = f"{int(alto_cm)} x {int(ancho_cm)} x {int(fondo_cm)} cm"
+        prefijo_medida = "Cofre Exteriores " if tipo_gabinete == "cofre_exteriores" else ""
+        medidas_texto = f"{prefijo_medida}{int(alto_cm)} x {int(ancho_cm)} x {int(fondo_cm)} cm"
 
     # -------------------------------------------------------------------------
     # 1. EXTRAER Y FILTRAR ACCESORIOS Y BUJES EXPLICITAMENTE

@@ -38,9 +38,11 @@ export default function Resumen({
   setDisenador: setDisenadorProp,
   API_BASE_URL = 'http://127.0.0.1:8000',
   nivelPrecio = 1,
+  modoCliente = false,
   // Marca blanca / equipo propio del distribuidor (por defecto: listas y membrete de fábrica)
   listaVendedores = LISTA_VENDEDORES,
   listaDisenadores = LISTA_DISENADORES,
+  vendedorBloqueado = false,
   membrete = null
 }) {
   const [clienteInterno, setClienteInterno] = useState(null);
@@ -762,14 +764,28 @@ export default function Resumen({
       {/* SECCIÓN RESPONSABLES: ASESOR COMERCIAL Y DISEÑADOR */}
       <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl space-y-2.5">
         <div>
-          <label className="text-[10px] uppercase font-bold text-slate-500 flex items-center gap-1 mb-1 tracking-wider">
-            <Briefcase size={12} className="text-blue-600" />
-            Asesor / Vendedor
+          <label className="text-[10px] uppercase font-bold text-slate-500 flex items-center justify-between gap-1 mb-1 tracking-wider">
+            <span className="flex items-center gap-1">
+              <Briefcase size={12} className="text-blue-600" />
+              Asesor / Vendedor
+            </span>
+            {vendedorBloqueado && (
+              <span className="text-[9px] normal-case bg-blue-50 text-blue-700 border border-blue-200 rounded px-1.5 py-0.5 font-semibold">
+                Vinculado a tu usuario
+              </span>
+            )}
           </label>
           <select
             value={vendedorSeleccionado}
-            onChange={(e) => setVendedorSeleccionado(e.target.value)}
-            className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1.5 text-xs text-slate-800 font-semibold outline-none focus:border-blue-500 shadow-sm cursor-pointer"
+            onChange={(e) => {
+              if (!vendedorBloqueado) setVendedorSeleccionado(e.target.value);
+            }}
+            disabled={vendedorBloqueado}
+            className={`w-full border rounded-lg px-2 py-1.5 text-xs font-semibold outline-none shadow-sm ${
+              vendedorBloqueado
+                ? 'bg-slate-100 border-slate-200 text-slate-600 cursor-not-allowed'
+                : 'bg-white border-slate-300 text-slate-800 focus:border-blue-500 cursor-pointer'
+            }`}
           >
             {opcionesVendedor.length === 0 && <option value="">Agrega asesores en “Mi Perfil”</option>}
             {opcionesVendedor.map((v, idx) => (
@@ -845,6 +861,11 @@ export default function Resumen({
                 <div className="bg-white border border-slate-200 p-2.5 rounded-lg text-[10px] space-y-1 font-medium text-slate-700">
                   {categoria === 'gabinetes' || categoria === 'totems' ? (
                     <>
+                      {(item.tipoGabinete === 'cofre_exteriores' || item.params?.tipoGabinete === 'cofre_exteriores' || item.configuracion?.tipoGabinete === 'cofre_exteriores') && (
+                        <p className="text-orange-800 bg-orange-50 border border-orange-200 rounded px-1.5 py-1 leading-snug">
+                          <strong>• Especificación:</strong> Cofre Metálico para Exteriores (Intemperie) en Lámina Cold Rolled {item.calibre ? (String(item.calibre).toLowerCase().includes('calibre') ? item.calibre : `Calibre ${item.calibre}`) : (item.lamina || 'Estándar')}, con techo voladizo vierteaguas, puerta ciega con chapa de seguridad y bandeja interna desmontable en color naranja.
+                        </p>
+                      )}
                       <p><strong className="text-slate-900">• Dimensiones:</strong> {item.alto || 120} cm (alto) x {item.ancho || 60} cm (ancho) x {item.fondo || 60} cm (fondo).</p>
                       <p><strong className="text-slate-900">• Calibre y Material:</strong> {item.lamina || item.tipoLamina || 'CR'}  {item.calibre}.</p>
                     </>
@@ -889,24 +910,26 @@ export default function Resumen({
                   </div>
                 )}
 
-                {/* DESGLOSE ECONÓMICO */}
-                <div className="pt-2 border-t border-slate-200 grid grid-cols-3 gap-1 text-[10px] text-slate-500">
-                  <div>Est: <span className="font-bold text-slate-700">{formatoMoneda(estructuraVenta)}</span></div>
-                  <div>Pint: <span className="font-bold text-slate-700">{formatoMoneda(pinturaVenta)}</span></div>
-                  <div>Acc/Comp: <span className="font-bold text-slate-700">{formatoMoneda(accesoriosVenta)}</span></div>
-                </div>
+                {/* DESGLOSE ECONÓMICO (Oculto en Modo Cliente) */}
+                {!modoCliente && (
+                  <div className="pt-2 border-t border-slate-200 grid grid-cols-3 gap-1 text-[10px] text-slate-500">
+                    <div>Est: <span className="font-bold text-slate-700">{formatoMoneda(estructuraVenta)}</span></div>
+                    <div>Pint: <span className="font-bold text-slate-700">{formatoMoneda(pinturaVenta)}</span></div>
+                    <div>Acc/Comp: <span className="font-bold text-slate-700">{formatoMoneda(accesoriosVenta)}</span></div>
+                  </div>
+                )}
 
                 <div className="flex justify-between items-center pt-2 text-xs border-t border-slate-100">
                   <div className="flex items-center gap-1.5">
                     <span className="font-bold text-slate-700">Subtotal Ítem (x{cantItem}):</span>
-                    {esEditado && (
+                    {!modoCliente && esEditado && (
                       <span className="bg-amber-100 text-amber-800 text-[9px] font-bold px-1.5 py-0.5 rounded border border-amber-300">
                         Manual
                       </span>
                     )}
                   </div>
 
-                  {editandoIdx === index ? (
+                  {!modoCliente && editandoIdx === index ? (
                     <div className="flex items-center gap-1">
                       <div className="relative flex items-center">
                         <span className="absolute left-2 text-[11px] text-slate-400 font-bold">$</span>
@@ -942,31 +965,35 @@ export default function Resumen({
                     </div>
                   ) : (
                     <div className="flex items-center gap-1.5">
-                      {esEditado && precioCalculado !== precioTotalItem && (
+                      {!modoCliente && esEditado && precioCalculado !== precioTotalItem && (
                         <span className="line-through text-slate-400 text-[10px]" title="Precio calculado sugerido">
                           {formatoMoneda(precioCalculado)}
                         </span>
                       )}
-                      <span className={`font-extrabold ${esEditado ? 'text-amber-600' : 'text-blue-600'}`}>
+                      <span className={`font-extrabold ${!modoCliente && esEditado ? 'text-amber-600' : 'text-blue-600'}`}>
                         {formatoMoneda(precioTotalItem)}
                       </span>
-                      <button
-                        type="button"
-                        onClick={() => iniciarEdicionPrecio(index, precioTotalItem)}
-                        title="Sobrescribir precio manualmente"
-                        className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition"
-                      >
-                        <Edit3 size={13} />
-                      </button>
-                      {esEditado && (
-                        <button
-                          type="button"
-                          onClick={() => handleEditarPrecioItem(index, null)}
-                          title="Restablecer precio al valor sugerido"
-                          className="p-1 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition"
-                        >
-                          <RotateCcw size={12} />
-                        </button>
+                      {!modoCliente && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => iniciarEdicionPrecio(index, precioTotalItem)}
+                            title="Sobrescribir precio manualmente"
+                            className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition"
+                          >
+                            <Edit3 size={13} />
+                          </button>
+                          {esEditado && (
+                            <button
+                              type="button"
+                              onClick={() => handleEditarPrecioItem(index, null)}
+                              title="Restablecer precio al valor sugerido"
+                              className="p-1 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition"
+                            >
+                              <RotateCcw size={12} />
+                            </button>
+                          )}
+                        </>
                       )}
                     </div>
                   )}

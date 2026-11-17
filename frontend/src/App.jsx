@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
-  Calculator, Settings, Eye, AlertCircle, History, 
+  Calculator, Settings, Eye, EyeOff, AlertCircle, History, 
   CheckCircle2, Plus, ChevronLeft, ChevronRight, UserCog, LogOut 
 } from 'lucide-react';
 
@@ -17,19 +17,34 @@ import ModalMiPerfil from './components/Perfil/ModalMiPerfil';
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
 
 export default function App() {
-  const { user, perfil, esSuperAdmin, esDistribuidor, logout } = useAuth();
+  const { user, perfil, esSuperAdmin, esDistribuidor, esVendedorWG, permisosModulos, logout } = useAuth();
   const [modalPerfil, setModalPerfil] = useState(false);
   const [tabActual, setTabActual] = useState('cotizador');
 
-  // Equipo: el distribuidor usa SU personal; la fábrica conserva las listas por defecto
-  const listaVendedores = useMemo(
-    () => (esDistribuidor ? (perfil?.personal || []).filter(p => p.tipo === 'ASESOR').map(p => p.nombre) : LISTA_VENDEDORES),
-    [esDistribuidor, perfil]
-  );
-  const listaDisenadores = useMemo(
-    () => (esDistribuidor ? (perfil?.personal || []).filter(p => p.tipo === 'DISENADOR').map(p => p.nombre) : LISTA_DISENADORES),
-    [esDistribuidor, perfil]
-  );
+  const categoriasPermitidas = useMemo(() => {
+    const todas = ['totems', 'postes', 'brazos', 'gabinetes'];
+    if (!esVendedorWG) return todas;
+    return todas.filter((c) => permisosModulos?.[c] !== false);
+  }, [esVendedorWG, permisosModulos]);
+
+  const permiteVideoportero = !esVendedorWG || permisosModulos?.videoportero !== false;
+  const puedeVerHistorial = !esVendedorWG || permisosModulos?.historial !== false;
+  const puedeVerAdmin = esSuperAdmin || (esVendedorWG && permisosModulos?.admin_precios === true);
+  const esModoSoloPublico = esVendedorWG && !permisosModulos?.admin_precios;
+  const vendedorVinculado = esVendedorWG && user?.personal_nombre ? user.personal_nombre : null;
+
+  // Equipo: el distribuidor usa SU personal; la fábrica usa el personal de fábrica (con fallback a listas por defecto)
+  const listaVendedores = useMemo(() => {
+    const asesoresPerfil = (perfil?.personal || []).filter(p => p.tipo === 'ASESOR').map(p => p.nombre);
+    if (esDistribuidor) return asesoresPerfil;
+    return asesoresPerfil.length > 0 ? asesoresPerfil : LISTA_VENDEDORES;
+  }, [esDistribuidor, perfil]);
+
+  const listaDisenadores = useMemo(() => {
+    const disenadoresPerfil = (perfil?.personal || []).filter(p => p.tipo === 'DISENADOR').map(p => p.nombre);
+    if (esDistribuidor) return disenadoresPerfil;
+    return disenadoresPerfil.length > 0 ? disenadoresPerfil : LISTA_DISENADORES;
+  }, [esDistribuidor, perfil]);
 
   // Marca blanca para el PDF (null => membrete de fábrica)
   const membretePdf = useMemo(() => (esDistribuidor && perfil ? {
@@ -82,7 +97,22 @@ export default function App() {
   const [consecutivo, setConsecutivo] = useState('COT-2001');
   const [cotizacionId, setCotizacionId] = useState(null);
   const [categoriaSel, setCategoriaSel] = useState('gabinetes');
-  const [nivelPrecio, setNivelPrecio] = useState(1);
+  const [nivelPrecio, setNivelPrecio] = useState(() => {
+    const saved = sessionStorage.getItem('m3_nivel_precio');
+    const parsed = saved ? Number(saved) : 1;
+    return parsed === 2 ? 2 : 1;
+  });
+  const [modoCliente, setModoCliente] = useState(() => {
+    return sessionStorage.getItem('m3_modo_cliente') === 'true';
+  });
+
+  useEffect(() => {
+    sessionStorage.setItem('m3_nivel_precio', String(nivelPrecio));
+  }, [nivelPrecio]);
+
+  useEffect(() => {
+    sessionStorage.setItem('m3_modo_cliente', String(modoCliente));
+  }, [modoCliente]);
   const [clienteSeleccionado, setClienteSeleccionado] = useState(null);
   const [notas, setNotas] = useState('');
   const [vendedor, setVendedor] = useState(listaVendedores[0] || '');
@@ -91,11 +121,24 @@ export default function App() {
   const [errorBackend, setErrorBackend] = useState(null);
   const [mensajeExito, setMensajeExito] = useState(null);
 
-  // Si el equipo cambia (Mi Perfil) y no hay selección, tomar el primero disponible
+  const modoClienteEfectivo = esModoSoloPublico ? true : modoCliente;
+
+  // Si el equipo cambia o el usuario es VENDEDOR_WG vinculado, fijar/inicializar el vendedor
   useEffect(() => {
-    if (!vendedor && listaVendedores[0]) setVendedor(listaVendedores[0]);
+    if (vendedorVinculado) {
+      setVendedor(vendedorVinculado);
+    } else if (!vendedor && listaVendedores[0]) {
+      setVendedor(listaVendedores[0]);
+    }
     if (!disenador && listaDisenadores[0]) setDisenador(listaDisenadores[0]);
-  }, [listaVendedores, listaDisenadores]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [vendedorVinculado, listaVendedores, listaDisenadores]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Asegurar que la categoría seleccionada esté permitida para el usuario
+  useEffect(() => {
+    if (categoriasPermitidas.length > 0 && !categoriasPermitidas.includes(categoriaSel)) {
+      setCategoriaSel(categoriasPermitidas[0]);
+    }
+  }, [categoriasPermitidas, categoriaSel]);
 
   const [historialCotizaciones, setHistorialCotizaciones] = useState([]);
   const [editandoFormulario, setEditandoFormulario] = useState(true);
@@ -544,6 +587,7 @@ export default function App() {
     const totalReal = Math.round(costoEstructuraReal + costoPinturaReal + costoAccReal);
 
     let materialNombre = 'Estructura Estándar';
+    let calibreLamina = '';
     if (categoriaSel === 'postes' || categoriaSel === 'brazos') {
       materialNombre = esBrazo
         ? `Soporte Brazo (${paramsParaBackend.tipoBrazo || 'SIMPLE_L'})`
@@ -551,14 +595,26 @@ export default function App() {
     } else {
       const laminaObj = laminas.find(l => String(l.id) === String(paramsParaBackend.laminaId));
       if (laminaObj) {
+        calibreLamina = laminaObj.calibre || '';
         materialNombre = `${laminaObj.material || 'Lámina'} (${laminaObj.calibre || 'Estándar'})`;
       }
     }
 
+    const tipoGabineteActual = paramsParaBackend.tipoGabinete || 'estandar';
+    const esCofreExteriores = categoriaSel === 'gabinetes' && tipoGabineteActual === 'cofre_exteriores';
+    const calibreTextoCofre = calibreLamina
+      ? (String(calibreLamina).toLowerCase().includes('calibre') ? calibreLamina : `Calibre ${calibreLamina}`)
+      : 'Calibre Estándar';
+    const descripcionItem = esCofreExteriores
+      ? `Cofre Metálico para Exteriores (Intemperie) en Lámina Cold Rolled ${calibreTextoCofre}, con techo voladizo vierteaguas, puerta ciega con chapa de seguridad y bandeja interna desmontable en color naranja`
+      : `${materialNombre} - Pintura: ${paramsParaBackend.nombrePintura || 'Estándar'} (${dataServidor?.area_m2 || 1.5} m²)`;
+
     const nuevoItem = {
       id: Date.now(),
       categoria: (categoriaSel || '').toUpperCase(),
-      descripcion: `${materialNombre} - Pintura: ${paramsParaBackend.nombrePintura || 'Estándar'} (${dataServidor?.area_m2 || 1.5} m²)`,
+      tipoGabinete: tipoGabineteActual,
+      calibre: calibreLamina,
+      descripcion: descripcionItem,
       medidas_texto: dataServidor?.medidas_texto || `${paramsParaBackend.alto || 60} cm`,
       lamina: materialNombre,
       laminaId: paramsParaBackend.laminaId,
@@ -687,7 +743,7 @@ export default function App() {
       setItemsCotizacion(itemsCargados);
 
       setNotas(data.observaciones || '');
-      setVendedor(data.asesor_id || data.asesor_nombre || data.vendedor || listaVendedores[0] || '');
+      setVendedor(vendedorVinculado || data.asesor_id || data.asesor_nombre || data.vendedor || listaVendedores[0] || '');
       setDisenador(data.disenador_id || data.disenador_nombre || data.disenador || listaDisenadores[0] || '');
 
       if (data.cliente || data.cliente_id || data.cliente_nombre) {
@@ -798,16 +854,36 @@ export default function App() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2 bg-slate-100 px-3 py-1 rounded-xl border border-slate-300 text-xs">
-          <span className="text-slate-600 font-medium hidden sm:inline">Margen:</span>
-          <select 
-            value={nivelPrecio} 
-            onChange={(e) => setNivelPrecio(Number(e.target.value))}
-            className="bg-white text-blue-700 font-bold outline-none cursor-pointer rounded px-2 py-0.5 border border-slate-300"
-          >
-            <option value={1}>Precio 1 </option>
-            <option value={2}>Precio 2 </option>
-          </select>
+        <div className="flex items-center gap-2">
+          {!modoClienteEfectivo && (
+            <div className="flex items-center gap-2 bg-slate-100 px-3 py-1 rounded-xl border border-slate-300 text-xs">
+              <span className="text-slate-600 font-medium hidden sm:inline">Margen:</span>
+              <select 
+                value={nivelPrecio} 
+                onChange={(e) => setNivelPrecio(Number(e.target.value))}
+                className="bg-white text-blue-700 font-bold outline-none cursor-pointer rounded px-2 py-0.5 border border-slate-300"
+              >
+                <option value={1}>Precio 1 </option>
+                <option value={2}>Precio 2 </option>
+              </select>
+            </div>
+          )}
+
+          {!esModoSoloPublico && (
+            <button
+              type="button"
+              onClick={() => setModoCliente((prev) => !prev)}
+              title={modoCliente ? 'Mostrar precios internos' : 'Ocultar precios internos'}
+              aria-label={modoCliente ? 'Mostrar precios internos' : 'Ocultar precios internos'}
+              className={`p-1.5 rounded-lg border transition flex items-center justify-center ${
+                modoCliente
+                  ? 'bg-slate-200 text-slate-700 border-slate-300 hover:bg-slate-300'
+                  : 'bg-slate-100 text-slate-500 border-slate-300 hover:bg-slate-200 hover:text-slate-700'
+              }`}
+            >
+              {modoCliente ? <EyeOff size={15} /> : <Eye size={15} />}
+            </button>
+          )}
         </div>
 
         <nav className="flex bg-slate-100 p-1 rounded-xl border border-slate-300 gap-1 text-xs">
@@ -817,9 +893,11 @@ export default function App() {
           >
             <Calculator size={14}/> Cotizador
           </button>
-          <button onClick={() => setTabActual('historial')} className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 font-semibold transition ${tabActual === 'historial' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'}`}><History size={14}/> Historial</button>
+          {puedeVerHistorial && (
+            <button onClick={() => setTabActual('historial')} className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 font-semibold transition ${tabActual === 'historial' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'}`}><History size={14}/> Historial</button>
+          )}
           <button onClick={() => setTabActual('galeria')} className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 font-semibold transition ${tabActual === 'galeria' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'}`}><Eye size={14}/> 3D</button>
-          {esSuperAdmin && (
+          {puedeVerAdmin && (
             <button onClick={() => setTabActual('admin')} className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 font-semibold transition ${tabActual === 'admin' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'}`}><Settings size={14}/> Admin</button>
           )}
         </nav>
@@ -869,6 +947,8 @@ export default function App() {
               <Configurador 
                 categoriaSel={categoriaSel} 
                 setCategoriaSel={handleCambioCategoria} 
+                categoriasPermitidas={categoriasPermitidas}
+                permiteVideoportero={permiteVideoportero}
                 params={params} 
                 setParams={actualizarParams} 
                 laminas={laminas}
@@ -876,6 +956,8 @@ export default function App() {
                 accesorios={accesorios} 
                 pinturas={pinturas}
                 bujes={bujes}
+                nivelPrecio={nivelPrecio}
+                modoCliente={modoClienteEfectivo}
                 handleAgregar={handleAgregarACotizacion} 
                 cargando={cargandoCotizacion}
               />
@@ -898,10 +980,12 @@ export default function App() {
                   setNotas={setNotas}
                   vendedor={vendedor}
                   setVendedor={setVendedor}
+                  vendedorBloqueado={Boolean(vendedorVinculado)}
                   disenador={disenador}
                   setDisenador={setDisenador}
                   API_BASE_URL={API_BASE_URL}
                   nivelPrecio={nivelPrecio}
+                  modoCliente={modoClienteEfectivo}
                   listaVendedores={listaVendedores}
                   listaDisenadores={listaDisenadores}
                   membrete={membretePdf}
@@ -923,13 +1007,14 @@ export default function App() {
                 tubos={tubos}
                 laminas={laminas}
                 accesorios={accesorios}
+                bujes={bujes}
                 colorPintura={datosParaVisor.colorPintura || params.colorPintura}
               />
             </div>
           </div>
         )}
 
-        {tabActual === 'historial' && (
+        {tabActual === 'historial' && puedeVerHistorial && (
           <HistorialCotizaciones 
             API_BASE_URL={API_BASE_URL}
             onCargarCotizacionExistente={handleCargarCotizacionExistente}
@@ -939,9 +1024,10 @@ export default function App() {
         )}
 
         {tabActual === 'galeria' && <Galeria />}
-        {tabActual === 'admin' && esSuperAdmin && (
+        {tabActual === 'admin' && puedeVerAdmin && (
           <PanelAdmin 
             API_BASE_URL={API_BASE_URL}
+            esSuperAdmin={esSuperAdmin}
             recargarDatos={cargarDatosServidor}
             laminas={laminas} setLaminas={setLaminas}
             tubos={tubos} setTubos={setTubos}

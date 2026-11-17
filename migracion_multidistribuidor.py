@@ -49,6 +49,13 @@ def migrar_multidistribuidor(engine) -> None:
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_cotizaciones_distribuidor_id ON cotizaciones (distribuidor_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_clientes_distribuidor_id ON clientes (distribuidor_id)"))
 
+        # Usuarios internos WG: personal_id + permisos_modulos + rol VENDEDOR_WG
+        conn.execute(text("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS personal_id INTEGER REFERENCES personal_distribuidor(id) ON DELETE SET NULL"))
+        conn.execute(text("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS permisos_modulos TEXT"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_usuarios_personal_id ON usuarios (personal_id)"))
+        conn.execute(text("ALTER TABLE usuarios DROP CONSTRAINT IF EXISTS ck_usuarios_rol"))
+        conn.execute(text("ALTER TABLE usuarios ADD CONSTRAINT ck_usuarios_rol CHECK (rol IN ('SUPERADMIN', 'DISTRIBUIDOR', 'VENDEDOR_WG'))"))
+
         # 2. Distribuidor de fábrica (dueño de los datos preexistentes y de las cotizaciones del SuperAdmin)
         fabrica_id = conn.execute(text("SELECT id FROM distribuidores WHERE es_fabrica IS TRUE ORDER BY id LIMIT 1")).scalar()
         if fabrica_id is None:
@@ -73,6 +80,33 @@ def migrar_multidistribuidor(engine) -> None:
         if not _constraint_existe(conn, "clientes", "uq_cliente_distribuidor_nit"):
             conn.execute(text("ALTER TABLE clientes ADD CONSTRAINT uq_cliente_distribuidor_nit UNIQUE (distribuidor_id, nit)"))
         conn.execute(text("ALTER TABLE cotizaciones ALTER COLUMN distribuidor_id SET NOT NULL"))
+
+        # 4b. Sembrar personal inicial de Fábrica WG si aún no tiene registros
+        conteo_personal = conn.execute(
+            text("SELECT COUNT(*) FROM personal_distribuidor WHERE distribuidor_id = :f"),
+            {"f": fabrica_id},
+        ).scalar()
+        if not conteo_personal:
+            asesores_defecto = [
+                "ZAPATA CARRANZA PAOLA KATHERINE - 0012",
+                "CORTES TORRES SANDRA PATRICIA - 0013",
+                "DUARTE RODRIGUEZ GUILLERMO - 0011",
+                "FARFAN CIFUENTES CRISTIAN FELIPE - 0008",
+                "GARCIA RAYO JUAN FELIPE - 0006",
+                "GARCIA CARRANZA WILFRED HERNANDO - 0002",
+                "RAMIREZ CARRANZA NORA VIVIANA - 0016",
+            ]
+            disenadores_defecto = ["WILFRED GARCIA", "LINA PUELLO", "INGENIERÍA WG"]
+            for nombre in asesores_defecto:
+                conn.execute(
+                    text("INSERT INTO personal_distribuidor (distribuidor_id, tipo, nombre) VALUES (:f, 'ASESOR', :n)"),
+                    {"f": fabrica_id, "n": nombre},
+                )
+            for nombre in disenadores_defecto:
+                conn.execute(
+                    text("INSERT INTO personal_distribuidor (distribuidor_id, tipo, nombre) VALUES (:f, 'DISENADOR', :n)"),
+                    {"f": fabrica_id, "n": nombre},
+                )
 
     # 5. SuperAdmin inicial desde variables de entorno
     from sqlalchemy.orm import Session

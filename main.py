@@ -21,7 +21,7 @@ from services import calcular_item_cotizacion
 import schemas as auth_schemas
 from auth import (
     router as auth_router, acceso_global, obtener_usuario_actual, requiere_superadmin,
-    resolver_distribuidor_id, obtener_fabrica, ROL_SUPERADMIN, ROL_DISTRIBUIDOR,
+    resolver_distribuidor_id, obtener_fabrica, ROL_SUPERADMIN, ROL_DISTRIBUIDOR, ROL_VENDEDOR_WG,
 )
 from distribuidor_router import router as distribuidor_router
 from consecutivos import obtener_siguiente_consecutivo as _preview_consecutivo, reservar_consecutivo
@@ -158,6 +158,8 @@ def startup_db_client():
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE cotizaciones ADD COLUMN IF NOT EXISTS asesor_nombre VARCHAR"))
             conn.execute(text("ALTER TABLE cotizaciones ADD COLUMN IF NOT EXISTS disenador_nombre VARCHAR"))
+            conn.execute(text("ALTER TABLE brazos_guardados ADD COLUMN IF NOT EXISTS distribuidor_id INTEGER"))
+            conn.execute(text("ALTER TABLE brazos_guardados ADD COLUMN IF NOT EXISTS configuracion_json TEXT"))
     except Exception as e:
         print(f"❌ Error migrando columnas asesor/disenador: {e}")
     
@@ -514,6 +516,122 @@ def obtener_brazos(db: Session = Depends(get_db)):
     return []
 
 
+class BrazoGuardadoSchema(BaseModel):
+    nombre: str
+    tubo_id: Optional[int] = None
+    tramos: List[Dict[str, Any]] = []
+    buje_inicial_id: Optional[Any] = None
+    buje_final_id: Optional[Any] = None
+    desarrollo_total_m: float = 0.0
+    cantidad_dobleces: int = 0
+    costo_total: float = 0.0
+    configuracion: Optional[Dict[str, Any]] = None
+
+
+def serializar_brazo_guardado(bg: models.BrazoGuardado) -> Dict[str, Any]:
+    try:
+        tramos = json.loads(bg.tramos_json) if bg.tramos_json else []
+    except Exception:
+        tramos = []
+    try:
+        config = json.loads(bg.configuracion_json) if getattr(bg, "configuracion_json", None) else {}
+    except Exception:
+        config = {}
+
+    return {
+        "id": bg.id,
+        "uid": f"guardado_{bg.id}",
+        "es_personalizado": True,
+        "distribuidor_id": getattr(bg, "distribuidor_id", None),
+        "nombre": bg.nombre,
+        "tubo_id": bg.tubo_id,
+        "tramos": tramos,
+        "buje_inicial_id": bg.buje_inicial_id if bg.buje_inicial_id is not None else config.get("bujeInicialId"),
+        "buje_final_id": bg.buje_final_id if bg.buje_final_id is not None else config.get("bujeFinalId"),
+        "desarrollo_total_m": float(bg.desarrollo_total_m or 0.0),
+        "cantidad_dobleces": int(bg.cantidad_dobleces or 0),
+        "costo_total": float(bg.costo_total or 0.0),
+        "precio": float(bg.costo_total or 0.0),
+        "configuracion": config,
+        "fecha_creacion": bg.fecha_creacion.isoformat() if bg.fecha_creacion else None,
+    }
+
+
+@app.get("/api/brazos-guardados")
+def obtener_brazos_guardados(
+    usuario: auth_schemas.UsuarioActual = Depends(obtener_usuario_actual),
+    db: Session = Depends(get_db),
+):
+    query = db.query(models.BrazoGuardado)
+    if usuario.rol in (ROL_DISTRIBUIDOR, ROL_VENDEDOR_WG):
+        query = query.filter(
+            (models.BrazoGuardado.distribuidor_id == usuario.distribuidor_id)
+            | (models.BrazoGuardado.distribuidor_id.is_(None))
+        )
+    registros = query.order_by(models.BrazoGuardado.fecha_creacion.desc()).all()
+    return [serializar_brazo_guardado(r) for r in registros]
+
+
+@app.post("/api/brazos-guardados")
+def crear_brazo_guardado(
+    payload: BrazoGuardadoSchema,
+    usuario: auth_schemas.UsuarioActual = Depends(obtener_usuario_actual),
+    db: Session = Depends(get_db),
+):
+    nombre_limpio = (payload.nombre or "").strip()
+    if not nombre_limpio:
+        raise HTTPException(status_code=400, detail="El nombre del brazo es obligatorio")
+
+    dist_id = usuario.distribuidor_id if usuario.rol in (ROL_DISTRIBUIDOR, ROL_VENDEDOR_WG) else None
+
+    def _to_int_or_none(val):
+        if val is None or val == "":
+            return None
+        try:
+            return int(val)
+        except (ValueError, TypeError):
+            return None
+
+    config_data = dict(payload.configuracion or {})
+    if payload.buje_inicial_id is not None and "bujeInicialId" not in config_data:
+        config_data["bujeInicialId"] = payload.buje_inicial_id
+    if payload.buje_final_id is not None and "bujeFinalId" not in config_data:
+        config_data["bujeFinalId"] = payload.buje_final_id
+
+    nuevo = models.BrazoGuardado(
+        distribuidor_id=dist_id,
+        nombre=nombre_limpio,
+        tubo_id=_to_int_or_none(payload.tubo_id),
+        tramos_json=json.dumps(payload.tramos or [], ensure_ascii=False),
+        configuracion_json=json.dumps(config_data, ensure_ascii=False),
+        buje_inicial_id=_to_int_or_none(payload.buje_inicial_id),
+        buje_final_id=_to_int_or_none(payload.buje_final_id),
+        desarrollo_total_m=float(payload.desarrollo_total_m or 0.0),
+        cantidad_dobleces=int(payload.cantidad_dobleces or 0),
+        costo_total=float(payload.costo_total or 0.0),
+    )
+    db.add(nuevo)
+    db.commit()
+    db.refresh(nuevo)
+    return serializar_brazo_guardado(nuevo)
+
+
+@app.delete("/api/brazos-guardados/{item_id}")
+def eliminar_brazo_guardado(
+    item_id: int,
+    usuario: auth_schemas.UsuarioActual = Depends(obtener_usuario_actual),
+    db: Session = Depends(get_db),
+):
+    reg = db.query(models.BrazoGuardado).filter(models.BrazoGuardado.id == item_id).first()
+    if not reg:
+        raise HTTPException(status_code=404, detail="Brazo guardado no encontrado")
+    if usuario.rol in (ROL_DISTRIBUIDOR, ROL_VENDEDOR_WG) and reg.distribuidor_id not in (usuario.distribuidor_id, None):
+        raise HTTPException(status_code=404, detail="Brazo guardado no encontrado")
+    db.delete(reg)
+    db.commit()
+    return {"ok": True, "id": item_id}
+
+
 # --- ENDPOINTS CONSECUTIVO Y HISTORIAL DE COTIZACIONES ---
 @app.get("/api/cotizaciones/siguiente-consecutivo")
 def get_siguiente_consecutivo(
@@ -526,9 +644,9 @@ def get_siguiente_consecutivo(
 
 
 def _query_cotizaciones_visibles(db: Session, usuario: auth_schemas.UsuarioActual):
-    """Aislamiento: un DISTRIBUIDOR solo ve sus cotizaciones; SUPERADMIN ve todas."""
+    """Aislamiento: un DISTRIBUIDOR o VENDEDOR_WG solo ve cotizaciones de su empresa (fábrica en VENDEDOR_WG); SUPERADMIN ve todas."""
     query = db.query(models.Cotizacion)
-    if usuario.rol == ROL_DISTRIBUIDOR:
+    if usuario.rol in (ROL_DISTRIBUIDOR, ROL_VENDEDOR_WG):
         query = query.filter(models.Cotizacion.distribuidor_id == usuario.distribuidor_id)
     return query
 
@@ -547,6 +665,8 @@ def listar_cotizaciones(
     usuario: auth_schemas.UsuarioActual = Depends(obtener_usuario_actual),
     db: Session = Depends(get_db),
 ):
+    if usuario.rol == ROL_VENDEDOR_WG and not usuario.permisos_modulos.get("historial", True):
+        raise HTTPException(status_code=403, detail="No tienes permiso para ver el historial de cotizaciones")
     query = _query_cotizaciones_visibles(db, usuario)
     if usuario.rol == ROL_SUPERADMIN and distribuidor_id is not None:
         query = query.filter(models.Cotizacion.distribuidor_id == distribuidor_id)
@@ -669,6 +789,8 @@ def guardar_cotizacion(
         cliente_nit_val = req.clienteNit or req.cliente_nit
         observaciones_val = req.observaciones or req.notas or ""
         asesor_val = req.asesor_nombre or req.vendedor or req.asesor_id
+        if usuario.rol == ROL_VENDEDOR_WG and usuario.personal_nombre:
+            asesor_val = usuario.personal_nombre
         disenador_val = req.disenador_nombre or req.disenador or req.disenador_id
         nivel_precio_val = nivel_precio_valido(req.nivelPrecio)
 

@@ -150,6 +150,11 @@ export const construirPaginaPlanoCAD = async (pdf, visorRef, item, index = 1, ma
   const altoVal = parseFloat(item?.alto || item?.detalles?.alto || 90);
   const anchoVal = parseFloat(item?.ancho || item?.detalles?.ancho || 60);
   const fondoVal = parseFloat(item?.fondo || item?.detalles?.fondo || 60);
+  const esCofreExteriores =
+    item?.tipoGabinete === 'cofre_exteriores' ||
+    item?.params?.tipoGabinete === 'cofre_exteriores' ||
+    item?.configuracion?.tipoGabinete === 'cofre_exteriores' ||
+    item?.detalles?.tipoGabinete === 'cofre_exteriores';
 
   // 3.1. EQUIVALENCIA EN UNIDADES RACK (1 RU = 4.445 CM)
   const ruCalculadas = Math.round(altoVal / 4.445);
@@ -236,8 +241,19 @@ export const construirPaginaPlanoCAD = async (pdf, visorRef, item, index = 1, ma
   pdf.text(`• Alto Estructura: ${altoVal} cm (~${ruCalculadas} RU)`, 16, startY + 20);
   pdf.text(`• Ancho Frontal: ${anchoVal} cm (${anchoVal * 10} mm)`, 16, startY + 34);
   pdf.text(`• Fondo / Profundidad: ${fondoVal} cm (${fondoVal * 10} mm)`, 16, startY + 48);
-  pdf.text(`• Capacidad Rack: ${ruCalculadas} Unidades RU (1.75")`, 16, startY + 62);
-  pdf.text(`• Categoría: ${categoria}`, 16, startY + 76);
+  if (esCofreExteriores) {
+    const visorAnchoCm = (anchoVal + 4.4).toFixed(1);
+    const visorFondoCm = (fondoVal + 5.1).toFixed(1);
+    const bandejaAnchoCm = Math.max(8, anchoVal - 6).toFixed(1);
+    const bandejaAltoCm = Math.max(8, altoVal - 6).toFixed(1);
+    pdf.text(`• Visera Voladiza Sup.: ${visorAnchoCm} x ${visorFondoCm} cm (doblez 1.8 cm)`, 16, startY + 62);
+    pdf.text(`• Bandeja Interna: ${bandejaAnchoCm} x ${bandejaAltoCm} cm (Naranja #D9530F)`, 16, startY + 76);
+    pdf.text(`• Marco Vierteaguas: Pestaña perimetral + Chapa cilíndrica`, 16, startY + 90);
+    pdf.text(`• Categoría: ${categoria} (COFRE EXTERIORES)`, 16, startY + 104);
+  } else {
+    pdf.text(`• Capacidad Rack: ${ruCalculadas} Unidades RU (1.75")`, 16, startY + 62);
+    pdf.text(`• Categoría: ${categoria}`, 16, startY + 76);
+  }
 
   pdf.setFillColor(30, 41, 59);
   pdf.rect(108, startY, 90, 7, 'F');
@@ -257,8 +273,8 @@ export const construirPaginaPlanoCAD = async (pdf, visorRef, item, index = 1, ma
   pdf.text(`• Material: ${item?.lamina || item?.calibre || 'Lámina CR (Cal 20)'}`, 112, startY + 20);
   pdf.text(`• Acabado: ${item?.pintura || item?.detalles?.pintura || 'Negro Mate'}`, 112, startY + 34);
   pdf.text(`• Proceso: Corte CNC / Plegado`, 112, startY + 48);
-  pdf.text(`• Refuerzos: Platina Cruz Soldada`, 112, startY + 62);
-  pdf.text(`• Calidad: Pre-pintura requerida`, 112, startY + 76);
+  pdf.text(esCofreExteriores ? `• Bandeja: Desmontable Naranja (#D9530F)` : `• Refuerzos: Platina Cruz Soldada`, 112, startY + 62);
+  pdf.text(esCofreExteriores ? `• Puerta: Ciega + Chapa Cromada + Vierteaguas` : `• Calidad: Pre-pintura requerida`, 112, startY + 76);
 
   pdf.setFontSize(7);
   pdf.setTextColor(148, 163, 184);

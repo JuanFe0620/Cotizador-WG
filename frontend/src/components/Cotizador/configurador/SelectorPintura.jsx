@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { Check } from 'lucide-react';
 
-export default function SelectorPintura({ params = {}, setParams, pinturas = [] }) {
+export default function SelectorPintura({ params = {}, setParams, pinturas = [], modoCliente = false }) {
   const listaPinturas = Array.isArray(pinturas) ? pinturas : [];
 
   useEffect(() => {
@@ -51,7 +51,7 @@ export default function SelectorPintura({ params = {}, setParams, pinturas = [] 
             <button
               key={p.id || index}
               type="button"
-              title={`${p.nombre} ${precioM2 > 0 ? `($${Number(precioM2).toLocaleString()}/m²)` : ''}`}
+              title={`${p.nombre}${!modoCliente && precioM2 > 0 ? ` ($${Number(precioM2).toLocaleString()}/m²)` : ''}`}
               onClick={() => setParams(prev => ({
                 ...prev,
                 colorPintura: hexColor,

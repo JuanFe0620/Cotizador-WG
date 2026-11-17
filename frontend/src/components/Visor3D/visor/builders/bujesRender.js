@@ -275,32 +275,18 @@ export function renderizarBujeOBase(
   const profTuboM = perfilTubo?.profundidadM || radioTuboM * 2;
   const mitadProfundidadM = esTuboPrismatico ? profTuboM / 2 : radioTuboM;
 
-  // Casos especiales procedurales (Platinas base redonda/cuadrada y Videoportero en punta)
-  const esPlatinaRedonda = str.includes('platina redonda') || str.includes('base redonda') || str === 'platina_redonda';
-  const esPlatinaCuadrada = str.includes('platina cuadrada') || str.includes('base cuadrada') || str === 'platina_cuadrada';
-  const esVideoportero = str.includes('videoportero') || str.includes('portero') || str.includes('intercom');
+  // Casos especiales: Platinas base procedurales
+  const esBaseRedondaSemiplana = str.includes('semiplana') || str.includes('semi plana');
+  const esBaseRedondaGlobo = str.includes('globo');
+  const esBasePlana20x12 = str.includes('20x12') || str.includes('20 x 12') || str.includes('base plana 20');
+  const esNuevoBujeGlb = esBaseRedondaSemiplana || esBaseRedondaGlobo || esBasePlana20x12;
 
-  if (esPlatinaRedonda || esPlatinaCuadrada || esVideoportero) {
+  const esPlatinaRedonda = !esNuevoBujeGlb && (str.includes('platina redonda') || str.includes('base redonda') || str === 'platina_redonda');
+  const esPlatinaCuadrada = !esNuevoBujeGlb && (str.includes('platina cuadrada') || str.includes('base cuadrada') || str === 'platina_cuadrada');
+
+  if (esPlatinaRedonda || esPlatinaCuadrada) {
     const grupoContenedor = new THREE.Group();
     grupoContenedor.position.copy(punto);
-
-    if (esVideoportero) {
-      const vForward = direccion.clone().normalize();
-      let vUp = new THREE.Vector3(0, 1, 0);
-      if (Math.abs(vForward.dot(vUp)) > 0.92) {
-        vUp = new THREE.Vector3(0, 0, -Math.sign(vForward.y || 1));
-      }
-      const vRight = new THREE.Vector3().crossVectors(vUp, vForward).normalize();
-      const vRealUp = new THREE.Vector3().crossVectors(vForward, vRight).normalize();
-
-      const matrizRotacion = new THREE.Matrix4().makeBasis(vRight, vRealUp, vForward);
-      const cuaternionAlineacion = new THREE.Quaternion().setFromRotationMatrix(matrizRotacion);
-      grupoContenedor.quaternion.copy(cuaternionAlineacion);
-
-      grupoContenedor.add(construirVideoporteroPunta(radioTuboM, materialTubo, perfilTubo));
-      grupoBrazo.add(grupoContenedor);
-      return;
-    }
 
     const dirNorm = direccion.clone().normalize();
     const cuaternionAlineacion = dirNorm.y < -0.9999
@@ -326,7 +312,13 @@ export function renderizarBujeOBase(
   let esPuntaExtensible = false;
 
   // MAPEO DE RUTAS SEGÚN PALABRAS CLAVE O IDS DE LA BASE DE DATOS
-  if (str === '4' || str === 'buje_4' || str.includes('platina') || str.includes('15x10') || str.includes('rectangular') || str.includes('perforada')) {
+  if (esBaseRedondaSemiplana) {
+    rutaGLB = '/models/Base Redonda Semiplana 15 Dim.glb';
+  } else if (esBaseRedondaGlobo) {
+    rutaGLB = '/models/Base redonda globo 15 Dim.glb';
+  } else if (esBasePlana20x12) {
+    rutaGLB = '/models/Base plana 20x12.glb';
+  } else if (str === '4' || str === 'buje_4' || str.includes('platina') || str.includes('15x10') || str.includes('rectangular') || str.includes('perforada')) {
     rutaGLB = '/models/Base15x10.glb';
     esBase15x10 = true;
   } else if (str === '2' || str === 'buje_2' || str.includes('roseta') || str.includes('rozeta') || str.includes('punta roseta')) {
@@ -396,6 +388,17 @@ export function renderizarBujeOBase(
 
       // CASO 2: Punta Extensible / Buje PTZ (Concéntrico al centro del tubo)
       if (esPuntaExtensible || rutaGLB.includes('Puntaextensible.glb')) {
+        const box = new THREE.Box3().setFromObject(model);
+        const center = box.getCenter(new THREE.Vector3());
+        model.position.set(-center.x, -box.min.y, -center.z);
+      }
+
+      // CASO 3: Nuevas Bases/Bujes GLB
+      if (esBasePlana20x12 || rutaGLB.includes('Base plana 20x12.glb')) {
+        // El agujero circular para el tubo en Base plana 20x12.glb está en (0.048238, -0.060100) en escala 1:1
+        const box = new THREE.Box3().setFromObject(model);
+        model.position.set(-0.048238 * escalaX, -box.min.y, 0.060100 * escalaZ);
+      } else if (esNuevoBujeGlb) {
         const box = new THREE.Box3().setFromObject(model);
         const center = box.getCenter(new THREE.Vector3());
         model.position.set(-center.x, -box.min.y, -center.z);

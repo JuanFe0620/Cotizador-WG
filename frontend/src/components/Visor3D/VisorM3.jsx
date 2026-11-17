@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useImperativeHandle, forwardRef, useCallback } from 'react';
+import React, { useEffect, useRef, useImperativeHandle, forwardRef, useCallback, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
@@ -19,6 +19,7 @@ const VisorM3 = forwardRef(({
   tubos = [], 
   accesorios = [], 
   laminas = [], 
+  bujes = [],
   cantidadesAcc = {} 
 }, ref) => {
   const containerRef = useRef(null);
@@ -29,6 +30,7 @@ const VisorM3 = forwardRef(({
   const controlsRef = useRef(null);
   const haInicializadoCamaraRef = useRef(false);
   const categoriaAnteriorRef = useRef(categoriaSel);
+  const [puertaCofreAbierta, setPuertaCofreAbierta] = useState(true);
 
   const renderizarEscena = useCallback((paramsTarget, cantidadesAccTarget = {}) => {
     const scene = sceneRef.current;
@@ -96,7 +98,8 @@ const VisorM3 = forwardRef(({
     const paramsCompletos = {
       ...paramsNormalizados,
       accesorios,
-      cantidadesAcc: cantidadesAccTarget
+      cantidadesAcc: cantidadesAccTarget,
+      puertaAbierta: puertaCofreAbierta
     };
 
     if (esGabinete) {
@@ -107,17 +110,20 @@ const VisorM3 = forwardRef(({
         scene
       });
 
-      construirPuerta({
-        loader,
-        params: paramsCompletos,
-        matGenerico,
-        scene
-      });
+      if (paramsCompletos.tipoGabinete !== 'cofre_exteriores') {
+        construirPuerta({
+          loader,
+          params: paramsCompletos,
+          matGenerico,
+          scene
+        });
+      }
 
       if (controlsRef.current && (!haInicializadoCamaraRef.current || cambioCategoria)) {
         const altoRef = altoGabinete || paramsNormalizados.alto || 100;
         const altoEnMetros = (altoRef < 10 ? altoRef * 100 : altoRef) / 100;
-        controlsRef.current.target.set(0.15, altoEnMetros / 2, 0);
+        const targetX = paramsCompletos.tipoGabinete === 'cofre_exteriores' ? 0 : 0.15;
+        controlsRef.current.target.set(targetX, altoEnMetros / 2, 0);
       }
     } else if (esTotem) {
       const totemMesh = buildTotem(paramsCompletos, loader, matGenerico);
@@ -312,9 +318,17 @@ const VisorM3 = forwardRef(({
                   medida: brazo.medida || brazo.nombre || ''
                 }];
 
+            const bIniId = brazo.bujeInicialId ?? brazo.buje_inicial_id ?? brazo.configuracion?.bujeInicialId;
+            const bFinId = brazo.bujeFinalId ?? brazo.buje_final_id ?? brazo.configuracion?.bujeFinalId;
+            const bujeInicialResuelto = brazo.bujeInicial || brazo.configuracion?.bujeInicial || (Array.isArray(bujes) ? bujes.find(b => String(b.id) === String(bIniId)) : null) || bIniId;
+            const bujeFinalResuelto = brazo.bujeFinal || brazo.configuracion?.bujeFinal || (Array.isArray(bujes) ? bujes.find(b => String(b.id) === String(bFinId)) : null) || bFinId;
+
             const brazoParamGroup = buildBrazo(
               {
                 ...brazo,
+                ...(brazo.configuracion || {}),
+                bujeInicial: bujeInicialResuelto,
+                bujeFinal: bujeFinalResuelto,
                 orientacion: 'suelo',
                 colorPintura: paramsNormalizados.colorPintura,
                 tramos: tramosBrazoPoste
@@ -375,7 +389,7 @@ const VisorM3 = forwardRef(({
     }
 
     haInicializadoCamaraRef.current = true;
-  }, [tubos, accesorios, laminas, categoriaSel]);
+  }, [tubos, accesorios, laminas, categoriaSel, puertaCofreAbierta]);
 
   useImperativeHandle(ref, () => ({
     getInstanciasThree: () => ({
@@ -481,9 +495,23 @@ const VisorM3 = forwardRef(({
     }
   }, [params, cantidadesAcc, categoriaSel, tubos, accesorios, laminas, renderizarEscena]);
 
+  const esCofreExteriores =
+    String(params?.categoria || categoriaSel || '').toLowerCase().includes('gabinete') &&
+    params?.tipoGabinete === 'cofre_exteriores';
+
   return (
     <div className="w-full h-full min-h-[450px] relative rounded-xl overflow-hidden">
       <div ref={containerRef} className="w-full h-full" />
+      {esCofreExteriores && (
+        <button
+          type="button"
+          onClick={() => setPuertaCofreAbierta(prev => !prev)}
+          className="absolute top-3 right-3 z-10 bg-slate-900/80 hover:bg-slate-900 text-white text-[11px] font-semibold px-3 py-1.5 rounded-lg border border-slate-700 shadow-md backdrop-blur-sm transition flex items-center gap-1.5"
+        >
+          <span className={`w-2 h-2 rounded-full ${puertaCofreAbierta ? 'bg-orange-400' : 'bg-emerald-400'}`} />
+          <span>{puertaCofreAbierta ? 'Cerrar Puerta' : 'Abrir Puerta (40°)'}</span>
+        </button>
+      )}
     </div>
   );
 });

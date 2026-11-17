@@ -307,6 +307,7 @@ function construirColumnaOrientada({
   espesorPlacaM,
   incluirVisera,
   tieneLprFrente,
+  caladosFrente = [],
   matPrincipal,
   matBorde
 }) {
@@ -319,19 +320,27 @@ function construirColumnaOrientada({
   const caidaPuntaVisera = tieneLprFrente ? 0.024 : 0.015;
   const espesorVisera = 0.018;
 
+  const tieneCaladosReales = Array.isArray(caladosFrente) && caladosFrente.length > 0;
+  const profundidadCalado = tieneCaladosReales ? Math.min(0.032, fondoM * 0.55) : 0;
+  const hzCuerpo = hz - profundidadCalado;
+
   // Perfil 2D lateral donde X_2D se transforma en +Z_mundo al aplicar rotateY(-Math.PI / 2):
   // -hz = cara trasera (-Z), +hz = cara frontal (+Z)
   const perfilColumna = new THREE.Shape();
   perfilColumna.moveTo(-hz, espesorPlacaM);
-  perfilColumna.lineTo(hz, espesorPlacaM);
+  perfilColumna.lineTo(hzCuerpo, espesorPlacaM);
 
   if (incluirVisera && vueloVisera > 0) {
-    perfilColumna.lineTo(hz, alturaInicioBisel);
-    perfilColumna.lineTo(hz + vueloVisera, altoM - caidaPuntaVisera);
-    perfilColumna.lineTo(hz + vueloVisera, altoM - caidaPuntaVisera + espesorVisera);
-    perfilColumna.lineTo(hz * 0.25, altoM);
+    perfilColumna.lineTo(hzCuerpo, alturaInicioBisel);
+    if (!tieneCaladosReales) {
+      perfilColumna.lineTo(hz + vueloVisera, altoM - caidaPuntaVisera);
+      perfilColumna.lineTo(hz + vueloVisera, altoM - caidaPuntaVisera + espesorVisera);
+      perfilColumna.lineTo(hz * 0.25, altoM);
+    } else {
+      perfilColumna.lineTo(hzCuerpo, altoM);
+    }
   } else {
-    perfilColumna.lineTo(hz, altoM);
+    perfilColumna.lineTo(hzCuerpo, altoM);
   }
 
   perfilColumna.lineTo(-hz, altoM);
@@ -357,6 +366,78 @@ function construirColumnaOrientada({
   const edgesGeo = new THREE.EdgesGeometry(columnaGeo, 25);
   const edgesLine = new THREE.LineSegments(edgesGeo, matBorde);
   grupoColumna.add(edgesLine);
+
+  // Lámina frontal perforada real (THREE.Shape con holes) + visera superior si hay calados en frente
+  if (tieneCaladosReales) {
+    const alturaTopeFrontal = (incluirVisera && vueloVisera > 0) ? alturaInicioBisel : altoM;
+    const hw = anchoM / 2;
+
+    const frenteShape = new THREE.Shape();
+    frenteShape.moveTo(-hw, espesorPlacaM);
+    frenteShape.lineTo(hw, espesorPlacaM);
+    frenteShape.lineTo(hw, alturaTopeFrontal);
+    frenteShape.lineTo(-hw, alturaTopeFrontal);
+    frenteShape.closePath();
+
+    caladosFrente.forEach((cal) => {
+      const mw = Math.min(cal.anchoHueco, anchoM - 0.012) / 2;
+      const mh = cal.altoHueco / 2;
+      const yMinH = Math.max(espesorPlacaM + 0.008, cal.yPos - mh);
+      const yMaxH = Math.min(alturaTopeFrontal - 0.008, cal.yPos + mh);
+      if (mw > 0.01 && yMaxH > yMinH + 0.01) {
+        const hole = new THREE.Path();
+        hole.moveTo(-mw, yMinH);
+        hole.lineTo(mw, yMinH);
+        hole.lineTo(mw, yMaxH);
+        hole.lineTo(-mw, yMaxH);
+        hole.closePath();
+        frenteShape.holes.push(hole);
+      }
+    });
+
+    const frenteGeo = new THREE.ExtrudeGeometry(frenteShape, {
+      depth: profundidadCalado,
+      bevelEnabled: true,
+      bevelThickness: 0.002,
+      bevelSize: 0.002,
+      bevelSegments: 2
+    });
+    frenteGeo.translate(0, 0, hzCuerpo);
+
+    const frenteMesh = new THREE.Mesh(frenteGeo, matPrincipal);
+    frenteMesh.castShadow = true;
+    frenteMesh.receiveShadow = true;
+    grupoColumna.add(frenteMesh);
+
+    const frenteEdges = new THREE.LineSegments(new THREE.EdgesGeometry(frenteGeo, 25), matBorde);
+    grupoColumna.add(frenteEdges);
+
+    // Visera superior independiente sobre el frente perforado
+    if (incluirVisera && vueloVisera > 0) {
+      const viseraShape = new THREE.Shape();
+      viseraShape.moveTo(hzCuerpo, alturaInicioBisel);
+      viseraShape.lineTo(hz + vueloVisera, altoM - caidaPuntaVisera);
+      viseraShape.lineTo(hz + vueloVisera, altoM - caidaPuntaVisera + espesorVisera);
+      viseraShape.lineTo(hz * 0.25, altoM);
+      viseraShape.lineTo(hzCuerpo, altoM);
+      viseraShape.closePath();
+
+      const viseraGeo = new THREE.ExtrudeGeometry(viseraShape, {
+        depth: anchoM,
+        bevelEnabled: true,
+        bevelThickness: 0.002,
+        bevelSize: 0.002,
+        bevelSegments: 2
+      });
+      viseraGeo.translate(0, 0, -anchoM / 2);
+      viseraGeo.rotateY(-Math.PI / 2);
+
+      const viseraMesh = new THREE.Mesh(viseraGeo, matPrincipal);
+      viseraMesh.castShadow = true;
+      viseraMesh.receiveShadow = true;
+      grupoColumna.add(viseraMesh);
+    }
+  }
 
   // Faldones laterales de la visera superior en +Z
   if (incluirVisera && vueloVisera > 0) {
@@ -389,6 +470,25 @@ function construirColumnaOrientada({
  * Crea un módulo/hueco mecanizado empotrado en la lámina (orientado localmente hacia +Z).
  * Si se monta en la cara posterior (-Z), el grupo se rota Math.PI en Y.
  */
+function crearMaterialVideoportero(colorPintura) {
+  const baseColor = new THREE.Color(colorPintura || '#1e293b');
+  const hsl = { h: 0, s: 0, l: 0 };
+  baseColor.getHSL(hsl);
+
+  // Desplazamiento sutil de luminosidad (14%): aclara tonos oscuros y oscurece tonos claros
+  const esOscuro = hsl.l < 0.45;
+  const nuevaL = esOscuro
+    ? Math.min(0.85, hsl.l + 0.14)
+    : Math.max(0.12, hsl.l - 0.14);
+
+  const colorTapa = new THREE.Color().setHSL(hsl.h, hsl.s, nuevaL);
+  return new THREE.MeshStandardMaterial({
+    color: colorTapa,
+    metalness: 0.42,
+    roughness: 0.34
+  });
+}
+
 function construirHuecoMecanizado({
   tipo,
   anchoM,
@@ -397,7 +497,9 @@ function construirHuecoMecanizado({
   matMarco,
   matAcrilico,
   matOscuro,
-  matLed
+  matLed,
+  matVideoportero = null,
+  loader = null
 }) {
   const grupo = new THREE.Group();
   grupo.name = `Mecanizado_${tipo}`;
@@ -514,55 +616,74 @@ function construirHuecoMecanizado({
       grupo.add(ranura);
     }
   } else {
-    // 'videoportero': Calado Videoportero / Control de Acceso con marco biselado, acrílico y parlante
-    const anchoModulo = Math.min(anchoM * 0.68, 0.165);
-    const altoModulo = 0.21;
+    // 'videoportero': Renderiza el modelo 3D real Plano Botones.glb rotado 180° (círculo grande abajo)
+    if (loader) {
+      const subGrupo = new THREE.Group();
+      grupo.add(subGrupo);
 
-    const marcoGeo = new THREE.BoxGeometry(anchoModulo, altoModulo, 0.012);
-    const marcoMesh = new THREE.Mesh(marcoGeo, matMarco);
-    marcoMesh.position.z = 0.005;
-    marcoMesh.castShadow = true;
-    grupo.add(marcoMesh);
+      const construirFallbackProcedural = () => {
+        const anchoModulo = Math.min(anchoM * 0.68, 0.165);
+        const altoModulo = 0.21;
+        const marcoGeo = new THREE.BoxGeometry(anchoModulo, altoModulo, 0.012);
+        const marcoMesh = new THREE.Mesh(marcoGeo, matMarco);
+        marcoMesh.position.z = 0.005;
+        marcoMesh.castShadow = true;
+        subGrupo.add(marcoMesh);
+      };
 
-    // Ventana de acrílico oscuro superior
-    const acrilicoGeo = new THREE.BoxGeometry(anchoModulo - 0.022, altoModulo * 0.48, 0.006);
-    const acrilicoMesh = new THREE.Mesh(acrilicoGeo, matAcrilico);
-    acrilicoMesh.position.set(0, altoModulo * 0.15, 0.010);
-    grupo.add(acrilicoMesh);
+      loader.load(
+        encodeURI('/models/Plano Botones.glb'),
+        (gltf) => {
+          const model = gltf.scene;
+          // Girar 180° en Y (-Math.PI / 2 = Math.PI / 2 + Math.PI) para que el frente mire hacia +Z
+          // y mantener la rotación de 180° en Z para que el círculo grande quede abajo
+          model.rotation.y = -Math.PI / 2;
+          const pivoteRot = new THREE.Group();
+          pivoteRot.add(model);
+          pivoteRot.rotation.z = Math.PI;
 
-    // Lente de cámara IP
-    const aroGeo = new THREE.CylinderGeometry(0.016, 0.016, 0.006, 24);
-    aroGeo.rotateX(Math.PI / 2);
-    const aro = new THREE.Mesh(aroGeo, matMarco);
-    aro.position.set(0, altoModulo * 0.16, 0.012);
-    grupo.add(aro);
+          // Ajustar escala si el tótem es más angosto que el equipo (16.5 cm)
+          const anchoMaxEquipo = Math.max(anchoM * 0.84, 0.10);
+          if (0.165 > anchoMaxEquipo) {
+            const escala = anchoMaxEquipo / 0.165;
+            pivoteRot.scale.setScalar(escala);
+          }
 
-    const lenteGeo = new THREE.CylinderGeometry(0.010, 0.010, 0.007, 24);
-    lenteGeo.rotateX(Math.PI / 2);
-    const lente = new THREE.Mesh(lenteGeo, matOscuro);
-    lente.position.set(0, altoModulo * 0.16, 0.013);
-    grupo.add(lente);
+          pivoteRot.updateMatrixWorld(true);
+          const box = new THREE.Box3().setFromObject(pivoteRot);
+          const center = box.getCenter(new THREE.Vector3());
+          // Montaje empotrado a ras: la caja trasera queda dentro del tótem (z < 0)
+          // y solo el frente/bisel sobresale 4 mm hacia afuera (+Z)
+          pivoteRot.position.set(-center.x, -center.y, -box.max.z + 0.004);
 
-    // Calados láser de parlante/micrófono
-    const ranuraAudioGeo = new THREE.BoxGeometry(anchoModulo * 0.52, 0.0035, 0.004);
-    for (let i = -1; i <= 1; i++) {
-      const ranura = new THREE.Mesh(ranuraAudioGeo, matOscuro);
-      ranura.position.set(0, -0.010 + i * 0.008, 0.011);
-      grupo.add(ranura);
+          pivoteRot.traverse((child) => {
+            if (child.isMesh) {
+              if (matVideoportero) {
+                child.material = matVideoportero;
+              }
+              child.castShadow = true;
+              child.receiveShadow = true;
+            }
+          });
+
+          subGrupo.add(pivoteRot);
+        },
+        undefined,
+        (err) => {
+          console.warn('Error cargando Plano Botones.glb en Tótem, usando fallback:', err);
+          construirFallbackProcedural();
+        }
+      );
+    } else {
+      const anchoModulo = Math.min(anchoM * 0.68, 0.165);
+      const altoModulo = 0.21;
+
+      const marcoGeo = new THREE.BoxGeometry(anchoModulo, altoModulo, 0.012);
+      const marcoMesh = new THREE.Mesh(marcoGeo, matMarco);
+      marcoMesh.position.z = 0.005;
+      marcoMesh.castShadow = true;
+      grupo.add(marcoMesh);
     }
-
-    // Botón timbre iluminado
-    const haloGeo = new THREE.CylinderGeometry(0.014, 0.014, 0.005, 24);
-    haloGeo.rotateX(Math.PI / 2);
-    const halo = new THREE.Mesh(haloGeo, matLed);
-    halo.position.set(0, -altoModulo * 0.25, 0.011);
-    grupo.add(halo);
-
-    const botonGeo = new THREE.CylinderGeometry(0.010, 0.010, 0.007, 24);
-    botonGeo.rotateX(Math.PI / 2);
-    const boton = new THREE.Mesh(botonGeo, matMarco);
-    boton.position.set(0, -altoModulo * 0.25, 0.012);
-    grupo.add(boton);
   }
 
   return grupo;
@@ -669,6 +790,36 @@ export function buildTotem(params = {}, loader = null, material = null) {
   const { listaFrente, listaTrasera } = extraerMecanizadosPorCara(params);
   const incluirVisera = params.viseraSuperior !== false;
   const tieneLprFrente = listaFrente.includes('lpr');
+  const matVideoportero = crearMaterialVideoportero(colorPintura);
+
+  const alturaInicioBiselFrente = altoM - (tieneLprFrente ? 0.13 : 0.095);
+  const alturaTopeFrontal = incluirVisera ? alturaInicioBiselFrente : altoM;
+
+  const anchoMaxEquipoVP = Math.max(anchoM * 0.84, 0.10);
+  const escalaVP = 0.165 > anchoMaxEquipoVP ? anchoMaxEquipoVP / 0.165 : 1.0;
+  const anchoHuecoVP = Math.max(0.06, 0.165 * escalaVP - 0.016);
+  const altoHuecoVP = Math.max(0.10, 0.35 * escalaVP - 0.016);
+
+  const alturasFrente = calcularAlturasMecanizados(listaFrente, altoM).map((yPos, idx) => {
+    if (listaFrente[idx] === 'videoportero') {
+      const yMaxSeguro = alturaTopeFrontal - (0.35 * escalaVP) / 2 - 0.015;
+      const yMinSeguro = espesorPlacaM + (0.35 * escalaVP) / 2 + 0.015;
+      return Math.max(yMinSeguro, Math.min(yPos, yMaxSeguro));
+    }
+    return yPos;
+  });
+
+  const caladosFrente = listaFrente
+    .map((tipo, idx) =>
+      tipo === 'videoportero'
+        ? {
+            yPos: alturasFrente[idx] ?? altoM * 0.7,
+            anchoHueco: anchoHuecoVP,
+            altoHueco: altoHuecoVP
+          }
+        : null
+    )
+    .filter(Boolean);
 
   // 4. Columna orientada con frente y visera hacia +Z
   const columnaGroup = construirColumnaOrientada({
@@ -678,6 +829,7 @@ export function buildTotem(params = {}, loader = null, material = null) {
     espesorPlacaM,
     incluirVisera,
     tieneLprFrente,
+    caladosFrente,
     matPrincipal,
     matBorde
   });
@@ -701,7 +853,6 @@ export function buildTotem(params = {}, loader = null, material = null) {
 
   // 6. Posicionar mecanizados en la cara frontal (+Z)
   const zFrente = fondoM / 2;
-  const alturasFrente = calcularAlturasMecanizados(listaFrente, altoM);
   listaFrente.forEach((tipo, idx) => {
     const yPos = alturasFrente[idx] ?? altoM * 0.7;
     const modMesh = construirHuecoMecanizado({
@@ -712,7 +863,9 @@ export function buildTotem(params = {}, loader = null, material = null) {
       matMarco,
       matAcrilico,
       matOscuro,
-      matLed
+      matLed,
+      matVideoportero,
+      loader
     });
     modMesh.position.set(0, yPos, zFrente);
     grupoTotem.add(modMesh);
@@ -731,7 +884,9 @@ export function buildTotem(params = {}, loader = null, material = null) {
       matMarco,
       matAcrilico,
       matOscuro,
-      matLed
+      matLed,
+      matVideoportero,
+      loader
     });
     modTrasero.position.set(0, yPos, zTrasero);
     modTrasero.rotation.y = Math.PI; // Mira hacia -Z (hacia atrás)

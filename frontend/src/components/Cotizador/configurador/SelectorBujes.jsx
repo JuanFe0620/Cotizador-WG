@@ -1,6 +1,6 @@
 import React from 'react';
 
-export default function SelectorBujes({ params = {}, setParams, bujes = [] }) {
+export default function SelectorBujes({ params = {}, setParams, bujes = [], modoCliente = false }) {
   // Función para normalizar texto
   const normalizar = (txt = '') =>
     String(txt)
@@ -11,8 +11,7 @@ export default function SelectorBujes({ params = {}, setParams, bujes = [] }) {
   // Bujes base esenciales garantizados
   const BUJES_DEFAULT = [
     { id: 'platina_redonda', nombre: 'Platina Redonda (Piso)', precio: 22000, subtipo: 'base' },
-    { id: 'platina_cuadrada', nombre: 'Platina Cuadrada (Piso)', precio: 22000, subtipo: 'base' },
-    { id: 'videoportero_punta', nombre: 'Soporte Videoportero en Punta', precio: 45000, subtipo: 'punta' }
+    { id: 'platina_cuadrada', nombre: 'Platina Cuadrada (Piso)', precio: 22000, subtipo: 'base' }
   ];
 
   // Combina bujes de BD con los bujes de platinas base si aún no están en la lista
@@ -29,7 +28,7 @@ export default function SelectorBujes({ params = {}, setParams, bujes = [] }) {
 
   const opcionesDisponibles = bujesCombinados.filter(b => {
     const nombre = normalizar(b.nombre || b.descripcion || '');
-    return !nombre.includes('cubo de ensamble');
+    return !nombre.includes('cubo de ensamble') && !nombre.includes('videoportero');
   });
 
   const esBrazoEnT = params.tipoBrazo === 'T' || params.tipoBrazo === 'T_BILATERAL';
@@ -107,7 +106,7 @@ export default function SelectorBujes({ params = {}, setParams, bujes = [] }) {
             <option value="">-- Sin Buje Base --</option>
             {opcionesDisponibles.map(b => (
               <option key={b.id} value={b.id}>
-                {b.nombre || b.descripcion} {b.precio ? `(+$${Number(b.precio).toLocaleString('es-CO')})` : ''}
+                {b.nombre || b.descripcion} {!modoCliente && b.precio ? `(+$${Number(b.precio).toLocaleString('es-CO')})` : ''}
               </option>
             ))}
           </select>
@@ -126,14 +125,14 @@ export default function SelectorBujes({ params = {}, setParams, bujes = [] }) {
             <option value="">-- Sin Buje Carga --</option>
             {opcionesDisponibles.map(b => (
               <option key={b.id} value={b.id}>
-                {b.nombre || b.descripcion} {b.precio ? `(+$${Number(b.precio).toLocaleString('es-CO')}${esBrazoEnT ? ' c/u' : ''})` : ''}
+                {b.nombre || b.descripcion} {!modoCliente && b.precio ? `(+$${Number(b.precio).toLocaleString('es-CO')}${esBrazoEnT ? ' c/u' : ''})` : ''}
               </option>
             ))}
           </select>
         </div>
       </div>
 
-      {/* Opciones Especiales: Caperuza embellecedora y Videoportero en punta */}
+      {/* Opciones Especiales: Caperuza embellecedora */}
       <div className="pt-2 border-t border-slate-200/80 space-y-2">
         {/* Caperuza Cubre-Anclaje */}
         <label className="flex items-start gap-2 cursor-pointer select-none bg-white p-2 rounded-lg border border-slate-200 hover:border-slate-300 transition">
@@ -157,35 +156,7 @@ export default function SelectorBujes({ params = {}, setParams, bujes = [] }) {
               Caperuza / Cubre-anclaje Embellecedora
             </span>
             <span className="text-[10px] text-slate-500 block">
-              Oculta la platina de piso y los pernos con un embellecedor cónico en la base (+ $25.000)
-            </span>
-          </div>
-        </label>
-
-        {/* Videoportero en punta */}
-        <label className="flex items-start gap-2 cursor-pointer select-none bg-white p-2 rounded-lg border border-slate-200 hover:border-slate-300 transition">
-          <input
-            type="checkbox"
-            checked={Boolean(tieneVideoportero)}
-            onChange={(e) => {
-              const checked = e.target.checked;
-              setParams(prev => ({
-                ...prev,
-                tieneVideoportero: checked,
-                accesorioVideoportero: checked,
-                videoporteroPunta: checked,
-                soporteVideoportero: checked,
-                accesorioPunta: checked ? 'videoportero' : ''
-              }));
-            }}
-            className="w-4 h-4 mt-0.5 rounded border-slate-300 text-blue-600 focus:ring-0"
-          />
-          <div>
-            <span className="text-[11px] font-bold text-slate-700 block">
-              Accesorio Videoportero en Punta de Brazo
-            </span>
-            <span className="text-[10px] text-slate-500 block">
-              Monta soporte/caja de videoportero adaptado con visera sobre platina final (+ $45.000)
+              Oculta la platina de piso y los pernos con un embellecedor cónico en la base{!modoCliente ? ' (+ $25.000)' : ''}
             </span>
           </div>
         </label>
