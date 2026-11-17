@@ -39,6 +39,7 @@ export default function Resumen({
   API_BASE_URL = 'http://127.0.0.1:8000',
   nivelPrecio = 1,
   modoCliente = false,
+  puedeEditarPrecio = true,
   // Marca blanca / equipo propio del distribuidor (por defecto: listas y membrete de fábrica)
   listaVendedores = LISTA_VENDEDORES,
   listaDisenadores = LISTA_DISENADORES,
@@ -922,14 +923,14 @@ export default function Resumen({
                 <div className="flex justify-between items-center pt-2 text-xs border-t border-slate-100">
                   <div className="flex items-center gap-1.5">
                     <span className="font-bold text-slate-700">Subtotal Ítem (x{cantItem}):</span>
-                    {!modoCliente && esEditado && (
+                    {!modoCliente && puedeEditarPrecio && esEditado && (
                       <span className="bg-amber-100 text-amber-800 text-[9px] font-bold px-1.5 py-0.5 rounded border border-amber-300">
                         Manual
                       </span>
                     )}
                   </div>
 
-                  {!modoCliente && editandoIdx === index ? (
+                  {!modoCliente && puedeEditarPrecio && editandoIdx === index ? (
                     <div className="flex items-center gap-1">
                       <div className="relative flex items-center">
                         <span className="absolute left-2 text-[11px] text-slate-400 font-bold">$</span>
@@ -965,15 +966,15 @@ export default function Resumen({
                     </div>
                   ) : (
                     <div className="flex items-center gap-1.5">
-                      {!modoCliente && esEditado && precioCalculado !== precioTotalItem && (
+                      {!modoCliente && puedeEditarPrecio && esEditado && precioCalculado !== precioTotalItem && (
                         <span className="line-through text-slate-400 text-[10px]" title="Precio calculado sugerido">
                           {formatoMoneda(precioCalculado)}
                         </span>
                       )}
-                      <span className={`font-extrabold ${!modoCliente && esEditado ? 'text-amber-600' : 'text-blue-600'}`}>
+                      <span className={`font-extrabold ${!modoCliente && puedeEditarPrecio && esEditado ? 'text-amber-600' : 'text-blue-600'}`}>
                         {formatoMoneda(precioTotalItem)}
                       </span>
-                      {!modoCliente && (
+                      {!modoCliente && puedeEditarPrecio && (
                         <>
                           <button
                             type="button"

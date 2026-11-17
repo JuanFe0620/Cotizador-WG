@@ -30,7 +30,8 @@ export default function App() {
   const permiteVideoportero = !esVendedorWG || permisosModulos?.videoportero !== false;
   const puedeVerHistorial = !esVendedorWG || permisosModulos?.historial !== false;
   const puedeVerAdmin = esSuperAdmin || (esVendedorWG && permisosModulos?.admin_precios === true);
-  const esModoSoloPublico = esVendedorWG && !permisosModulos?.admin_precios;
+  const puedeGestionarPrecios = esSuperAdmin || esVendedorWG;
+  const esModoSoloPublico = !puedeGestionarPrecios;
   const vendedorVinculado = esVendedorWG && user?.personal_nombre ? user.personal_nombre : null;
 
   // Equipo: el distribuidor usa SU personal; la fábrica usa el personal de fábrica (con fallback a listas por defecto)
@@ -857,7 +858,7 @@ export default function App() {
         </div>
 
         <div className="flex items-center gap-2">
-          {!modoClienteEfectivo && (
+          {puedeGestionarPrecios && !modoClienteEfectivo && (
             <div className="flex items-center gap-2 bg-slate-100 px-3 py-1 rounded-xl border border-slate-300 text-xs">
               <span className="text-slate-600 font-medium hidden sm:inline">Margen:</span>
               <select 
@@ -871,7 +872,7 @@ export default function App() {
             </div>
           )}
 
-          {!esModoSoloPublico && (
+          {puedeGestionarPrecios && (
             <button
               type="button"
               onClick={() => setModoCliente((prev) => !prev)}
@@ -988,6 +989,7 @@ export default function App() {
                   API_BASE_URL={API_BASE_URL}
                   nivelPrecio={nivelPrecio}
                   modoCliente={modoClienteEfectivo}
+                  puedeEditarPrecio={puedeGestionarPrecios}
                   listaVendedores={listaVendedores}
                   listaDisenadores={listaDisenadores}
                   membrete={membretePdf}
