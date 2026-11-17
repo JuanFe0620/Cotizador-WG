@@ -110,6 +110,7 @@ export default function ConfiguradorTotem({
             : mecanizadosTraserosInit.length,
         mecanizadosTraseros: mecanizadosTraserosInit,
         viseraSuperior: prev.viseraSuperior !== undefined ? prev.viseraSuperior : true,
+        caperuzaVideoportero: prev.caperuzaVideoportero ?? prev.tieneCaperuzaVideoportero ?? false,
         tapaRegistro:
           prev.tapaRegistro !== undefined
             ? prev.tapaRegistro
@@ -421,6 +422,32 @@ export default function ConfiguradorTotem({
                 );
               })}
             </div>
+          )}
+
+          {(mecanizadosFrente.includes('videoportero') || mecanizadosTraseros.includes('videoportero')) && (
+            <label className="flex items-start gap-2 cursor-pointer select-none bg-slate-50 p-2 rounded-lg border border-slate-200 hover:border-slate-300 transition mt-2">
+              <input
+                type="checkbox"
+                checked={Boolean(params.caperuzaVideoportero ?? params.tieneCaperuzaVideoportero)}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  setParams((prev) => ({
+                    ...prev,
+                    caperuzaVideoportero: checked,
+                    tieneCaperuzaVideoportero: checked
+                  }));
+                }}
+                className="w-4 h-4 mt-0.5 rounded border-slate-300 text-blue-600 focus:ring-0"
+              />
+              <div>
+                <span className="text-[11px] font-bold text-slate-700 block">
+                  Caperuza videoportero
+                </span>
+                <span className="text-[10px] text-slate-500 block">
+                  Visera protectora metálica encima y alrededor del marco del videoportero
+                </span>
+              </div>
+            </label>
           )}
         </div>
 

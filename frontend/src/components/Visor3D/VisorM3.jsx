@@ -219,7 +219,7 @@ const VisorM3 = forwardRef(({
         scene, 
         obtenerPulgadasTubo,
         esCuadrado,
-        params: paramsNormalizados 
+        params: paramsCompletos 
       });
 
       paramsNormalizados.accesoriosSeleccionados.forEach((accId) => {

@@ -136,6 +136,8 @@ export default function Configurador({
         tipoFrente: 'videoportero',
         modulos: ['videoportero'],
         viseraSuperior: true,
+        caperuzaVideoportero: false,
+        tieneCaperuzaVideoportero: false,
         tapaRegistro: true,
         anchoBase: 39,
         fondoBase: 25,

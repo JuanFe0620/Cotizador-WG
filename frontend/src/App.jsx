@@ -293,6 +293,8 @@ export default function App() {
         caperuzaEmbellecedora: false,
         caperuzaBase: false,
         cubreAnclaje: false,
+        caperuzaVideoportero: false,
+        tieneCaperuzaVideoportero: false,
         tieneVideoportero: false,
         accesorioVideoportero: false,
         videoporteroPunta: false,

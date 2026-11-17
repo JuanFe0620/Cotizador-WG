@@ -489,6 +489,94 @@ function crearMaterialVideoportero(colorPintura) {
   });
 }
 
+function construirCaperuzaVideoportero({
+  anchoM,
+  matPrincipal,
+  matBorde
+}) {
+  const grupoCaperuza = new THREE.Group();
+  grupoCaperuza.name = 'CaperuzaVideoportero';
+
+  const anchoMaxEquipo = Math.max(anchoM * 0.84, 0.10);
+  const escalaVP = 0.165 > anchoMaxEquipo ? anchoMaxEquipo / 0.165 : 1.0;
+
+  const anchoEquipo = 0.165 * escalaVP;
+  const altoEquipo = 0.35 * escalaVP;
+
+  const espesorLamina = 0.003;
+  const margenX = 0.006;
+  const margenY = 0.008;
+
+  const anchoInt = Math.min(anchoEquipo + margenX * 2, anchoM - 0.006);
+  const anchoExt = anchoInt + espesorLamina * 2;
+  const altoTotal = altoEquipo + margenY * 2;
+  const yTop = altoTotal / 2;
+  const yBot = -altoTotal / 2;
+
+  const profSup = 0.075;
+  const profInf = 0.025;
+  const caidaTecho = 0.012;
+
+  // 1. Faldones laterales (izquierdo y derecho) en plano ZY (X_2D -> +Z tras rotateY(-PI/2))
+  const faldonShape = new THREE.Shape();
+  faldonShape.moveTo(0, yBot);
+  faldonShape.lineTo(profInf, yBot);
+  faldonShape.lineTo(profSup, yTop - caidaTecho);
+  faldonShape.lineTo(0, yTop);
+  faldonShape.closePath();
+
+  const faldonGeo = new THREE.ExtrudeGeometry(faldonShape, {
+    depth: espesorLamina,
+    bevelEnabled: false
+  });
+  faldonGeo.translate(0, 0, -espesorLamina / 2);
+  faldonGeo.rotateY(-Math.PI / 2);
+
+  const faldonEdgesGeo = new THREE.EdgesGeometry(faldonGeo, 25);
+
+  [-1, 1].forEach((signoX) => {
+    const posX = signoX * (anchoInt / 2 + espesorLamina / 2);
+    const faldonMesh = new THREE.Mesh(faldonGeo, matPrincipal);
+    faldonMesh.position.x = posX;
+    faldonMesh.castShadow = true;
+    faldonMesh.receiveShadow = true;
+    grupoCaperuza.add(faldonMesh);
+
+    if (matBorde) {
+      const faldonEdges = new THREE.LineSegments(faldonEdgesGeo, matBorde);
+      faldonEdges.position.x = posX;
+      grupoCaperuza.add(faldonEdges);
+    }
+  });
+
+  // 2. Techo / visera superior inclinada cubriendo todo el ancho exterior
+  const techoShape = new THREE.Shape();
+  techoShape.moveTo(0, yTop);
+  techoShape.lineTo(profSup, yTop - caidaTecho);
+  techoShape.lineTo(profSup, yTop - caidaTecho + espesorLamina);
+  techoShape.lineTo(0, yTop + espesorLamina);
+  techoShape.closePath();
+
+  const techoGeo = new THREE.ExtrudeGeometry(techoShape, {
+    depth: anchoExt,
+    bevelEnabled: false
+  });
+  techoGeo.translate(0, 0, -anchoExt / 2);
+  techoGeo.rotateY(-Math.PI / 2);
+
+  const techoMesh = new THREE.Mesh(techoGeo, matPrincipal);
+  techoMesh.castShadow = true;
+  techoMesh.receiveShadow = true;
+  grupoCaperuza.add(techoMesh);
+
+  if (matBorde) {
+    const techoEdges = new THREE.LineSegments(new THREE.EdgesGeometry(techoGeo, 25), matBorde);
+    grupoCaperuza.add(techoEdges);
+  }
+
+  return grupoCaperuza;
+}
+
 function construirHuecoMecanizado({
   tipo,
   anchoM,
@@ -498,7 +586,9 @@ function construirHuecoMecanizado({
   matAcrilico,
   matOscuro,
   matLed,
+  matBorde = null,
   matVideoportero = null,
+  tieneCaperuzaVideoportero = false,
   loader = null
 }) {
   const grupo = new THREE.Group();
@@ -684,6 +774,15 @@ function construirHuecoMecanizado({
       marcoMesh.castShadow = true;
       grupo.add(marcoMesh);
     }
+
+    if (tieneCaperuzaVideoportero) {
+      const caperuzaVP = construirCaperuzaVideoportero({
+        anchoM,
+        matPrincipal,
+        matBorde
+      });
+      grupo.add(caperuzaVP);
+    }
   }
 
   return grupo;
@@ -789,6 +888,13 @@ export function buildTotem(params = {}, loader = null, material = null) {
   // 3. Mecanizados en frente (+Z) y posterior (-Z)
   const { listaFrente, listaTrasera } = extraerMecanizadosPorCara(params);
   const incluirVisera = params.viseraSuperior !== false;
+  const tieneCaperuzaVideoportero = Boolean(
+    params.caperuzaVideoportero ||
+    params.tieneCaperuzaVideoportero ||
+    params.caperuza_videoportero ||
+    params.tieneCaperuza ||
+    params.caperuza
+  );
   const tieneLprFrente = listaFrente.includes('lpr');
   const matVideoportero = crearMaterialVideoportero(colorPintura);
 
@@ -864,7 +970,9 @@ export function buildTotem(params = {}, loader = null, material = null) {
       matAcrilico,
       matOscuro,
       matLed,
+      matBorde,
       matVideoportero,
+      tieneCaperuzaVideoportero,
       loader
     });
     modMesh.position.set(0, yPos, zFrente);
@@ -885,7 +993,9 @@ export function buildTotem(params = {}, loader = null, material = null) {
       matAcrilico,
       matOscuro,
       matLed,
+      matBorde,
       matVideoportero,
+      tieneCaperuzaVideoportero,
       loader
     });
     modTrasero.position.set(0, yPos, zTrasero);

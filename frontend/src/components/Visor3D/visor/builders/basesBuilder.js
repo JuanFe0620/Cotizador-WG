@@ -171,4 +171,64 @@ export function construirBases(props) {
       (err) => console.error(`Error al cargar pie de amigo (${archivoPie}):`, err)
     );
   }
+
+  // 5. CAPERUZA / CUBRE-ANCLAJE EMBELLECEDORA EN BASE DEL POSTE
+  const tieneCaperuza = Boolean(
+    params?.tieneCaperuza ||
+    params?.caperuzaEmbellecedora ||
+    params?.caperuzaBase ||
+    params?.cubreAnclaje ||
+    params?.caperuza ||
+    (params?.accesoriosSeleccionados || []).some((acc) => {
+      const accId = typeof acc === 'object' ? acc.id : acc;
+      const accObj = Array.isArray(params?.accesorios)
+        ? params.accesorios.find((a) => String(a.id) === String(accId))
+        : null;
+      const txt = `${accId || ''} ${accObj?.nombre || ''}`.toLowerCase();
+      return txt.includes('caperuza') || txt.includes('cubre-anclaje') || txt.includes('cubre anclaje');
+    })
+  );
+
+  if (tieneCaperuza) {
+    const altoCaperuzaM = 0.085;
+    const radioCaperuzaM = Math.max(medioLado + 0.012, radioTuboM * 4.2, 0.135);
+
+    const grupoCaperuza = new THREE.Group();
+    grupoCaperuza.name = 'CaperuzaEmbellecedoraBasePoste';
+
+    const caperuzaGeo = new THREE.CylinderGeometry(
+      radioCaperuzaM,
+      radioCaperuzaM,
+      altoCaperuzaM,
+      48,
+      1,
+      false
+    );
+    const caperuzaMesh = new THREE.Mesh(caperuzaGeo, matGenerico);
+    caperuzaMesh.position.y = altoCaperuzaM / 2;
+    caperuzaMesh.castShadow = true;
+    caperuzaMesh.receiveShadow = true;
+    grupoCaperuza.add(caperuzaMesh);
+
+    const biselSuperiorGeo = new THREE.TorusGeometry(radioCaperuzaM - 0.003, 0.003, 16, 48);
+    biselSuperiorGeo.rotateX(Math.PI / 2);
+    const biselSuperior = new THREE.Mesh(biselSuperiorGeo, matGenerico);
+    biselSuperior.position.y = altoCaperuzaM;
+    grupoCaperuza.add(biselSuperior);
+
+    const collarinCuelloGeo = esCuadrado
+      ? new THREE.BoxGeometry(radioTuboM * 2 + 0.014, 0.006, radioTuboM * 2 + 0.014)
+      : new THREE.CylinderGeometry(radioTuboM + 0.007, radioTuboM + 0.007, 0.006, 32);
+    const collarinCuello = new THREE.Mesh(collarinCuelloGeo, matGenerico);
+    collarinCuello.position.y = altoCaperuzaM + 0.003;
+    grupoCaperuza.add(collarinCuello);
+
+    const aroBaseGeo = new THREE.TorusGeometry(radioCaperuzaM, 0.0035, 16, 48);
+    aroBaseGeo.rotateX(Math.PI / 2);
+    const aroBaseMesh = new THREE.Mesh(aroBaseGeo, matGenerico);
+    aroBaseMesh.position.y = 0.0035;
+    grupoCaperuza.add(aroBaseMesh);
+
+    grupoBaseCompleta.add(grupoCaperuza);
+  }
 }
