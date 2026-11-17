@@ -137,61 +137,12 @@ export const construirCofreExteriores = ({ params, matGenerico, scene }) => {
   grupoVisera.add(tapaVisera, doblezFront, doblezIzq, doblezDer, doblezBack);
   grupoCofre.add(grupoVisera);
 
-  // 4. BANDEJA / PLACA DE MONTAJE INTERNA (Fondo falso naranja industrial #D9530F)
-  const matBandeja = new THREE.MeshStandardMaterial({
-    color: 0xd9530f,
-    metalness: 0.25,
-    roughness: 0.45
-  });
+  // Material metálico para bisagras y leva de chapa
   const matMetal = new THREE.MeshStandardMaterial({
     color: 0xcbd5e1,
     metalness: 0.85,
     roughness: 0.25
   });
-
-  const marginBandeja = Math.min(0.035, Math.min(W, H) * 0.08);
-  const bandejaW = Math.max(0.08, W - 2 * marginBandeja);
-  const bandejaH = Math.max(0.08, H - 2 * marginBandeja);
-  const separacionFondo = Math.min(0.022, D * 0.12);
-  const bandejaZ = -D / 2 + t + separacionFondo;
-
-  const grupoBandeja = new THREE.Group();
-  grupoBandeja.name = 'bandeja_montaje_naranja';
-
-  const placaBandeja = new THREE.Mesh(new THREE.BoxGeometry(bandejaW, bandejaH, 0.003), matBandeja);
-  placaBandeja.position.set(0, H / 2, bandejaZ);
-  grupoBandeja.add(placaBandeja);
-
-  // Dobleces laterales de refuerzo en la bandeja
-  const doblezBandejaGeo = new THREE.BoxGeometry(0.003, bandejaH, 0.012);
-  const doblezBandejaIzq = new THREE.Mesh(doblezBandejaGeo, matBandeja);
-  doblezBandejaIzq.position.set(-bandejaW / 2 + 0.0015, H / 2, bandejaZ - 0.006);
-  const doblezBandejaDer = new THREE.Mesh(doblezBandejaGeo, matBandeja);
-  doblezBandejaDer.position.set(bandejaW / 2 - 0.0015, H / 2, bandejaZ - 0.006);
-  grupoBandeja.add(doblezBandejaIzq, doblezBandejaDer);
-
-  // 4 Separadores y tornillos de fijación al fondo
-  const offsetSepX = bandejaW / 2 - Math.min(0.02, bandejaW * 0.1);
-  const offsetSepY = bandejaH / 2 - Math.min(0.02, bandejaH * 0.1);
-  const geoSeparador = new THREE.CylinderGeometry(0.006, 0.006, separacionFondo, 12);
-  geoSeparador.rotateX(Math.PI / 2);
-  const geoTornillo = new THREE.CylinderGeometry(0.005, 0.005, 0.004, 12);
-  geoTornillo.rotateX(Math.PI / 2);
-
-  [
-    [-offsetSepX, H / 2 + offsetSepY],
-    [offsetSepX, H / 2 + offsetSepY],
-    [-offsetSepX, H / 2 - offsetSepY],
-    [offsetSepX, H / 2 - offsetSepY]
-  ].forEach(([sx, sy]) => {
-    const sep = new THREE.Mesh(geoSeparador, matMetal);
-    sep.position.set(sx, sy, -D / 2 + t + separacionFondo / 2);
-    const tornillo = new THREE.Mesh(geoTornillo, matMetal);
-    tornillo.position.set(sx, sy, bandejaZ + 0.003);
-    grupoBandeja.add(sep, tornillo);
-  });
-
-  grupoCofre.add(grupoBandeja);
 
   // 5. PUERTA BATIENTE CIEGA (BISAGRAS DERECHAS) + CHAPA CROMADA (LADO IZQUIERDO)
   const grupoPuerta = new THREE.Group();

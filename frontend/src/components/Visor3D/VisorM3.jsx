@@ -406,24 +406,35 @@ const VisorM3 = forwardRef(({
           return;
         }
 
+        const extraParams = item.params || item.configuracion || item.detalles || {};
         const paramsItem = {
+          ...extraParams,
           ...item,
-          tramos: item.tramos || item.detalles?.tramos || [],
-          accesoriosSeleccionados: item.accesoriosSeleccionados || (item.accesorios_lista || []).map(a => a.id),
-          colorPintura: item.pintura || item.colorPintura || '#2563eb'
+          categoria: item.categoria || extraParams.categoria || '',
+          tramos: item.tramos || extraParams.tramos || item.detalles?.tramos || [],
+          accesoriosSeleccionados:
+            item.accesoriosSeleccionados ||
+            extraParams.accesoriosSeleccionados ||
+            (item.accesorios_lista || item.accesoriosLista || []).map(a => a.id),
+          colorPintura: item.colorPintura || extraParams.colorPintura || '#2563eb'
         };
 
-        const cantidadesAccItem = item.cantidadesAcc || {};
+        const cantidadesAccItem = item.cantidadesAcc || extraParams.cantidadesAcc || {};
 
         renderizarEscena(paramsItem, cantidadesAccItem);
 
+        // Esperar a que los modelos/geometrías y dos frames de animación se completen
         setTimeout(() => {
-          if (sceneRef.current && cameraRef.current && rendererRef.current) {
-            sceneRef.current.updateMatrixWorld(true);
-            rendererRef.current.render(sceneRef.current, cameraRef.current);
-          }
-          resolve();
-        }, 450);
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              if (sceneRef.current && cameraRef.current && rendererRef.current) {
+                sceneRef.current.updateMatrixWorld(true);
+                rendererRef.current.render(sceneRef.current, cameraRef.current);
+              }
+              resolve();
+            });
+          });
+        }, 350);
       });
     }
   }), [renderizarEscena]);

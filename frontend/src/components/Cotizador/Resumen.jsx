@@ -397,19 +397,31 @@ export default function Resumen({
     return (Millones(entero) + " PESOS CON 00/100 M/CTE").replace(/\s+/g, ' ').trim();
   }, []);
 
+  const formatearCalibreLimpio = (raw) => {
+    if (!raw) return '';
+    const str = String(raw).trim();
+    if (!str) return '';
+    return /^calibre\b/i.test(str) ? str : `Calibre ${str}`;
+  };
+
   const formatoCalibreTexto = useCallback((item) => {
     const tramos = item.tramos || item.detalles?.tramos || [];
     if (tramos.length > 0) {
       const t = tramos[0];
       const tipo = (t.tipoTubo || t.tipo || 'Tubo Industrial').replace(/tubo/gi, '').trim();
-      const cal = t.calibre || t.calibreTexto || item.calibre || '';
+      const calRaw = t.calibre || t.calibreTexto || item.calibre || '';
+      const calTxt = formatearCalibreLimpio(calRaw);
       const diam = t.diametro || t.diametroTexto || item.diametro || '';
-      return `Tubo ${tipo} Calibre ${cal}${diam ? ' Ø ' + diam + '"' : ''}`;
+      return `Tubo ${tipo}${calTxt ? ' ' + calTxt : ''}${diam ? ' Ø ' + diam + '"' : ''}`.replace(/\s+/g, ' ').trim();
     }
 
     if (item.lamina || item.tipoLamina) {
-      const cal = item.calibre ? ` (Calibre ${item.calibre})` : '';
-      return `Lámina ${item.lamina || item.tipoLamina}${cal}`;
+      const laminaRaw = String(item.lamina || item.tipoLamina).replace(/\b(l[áa]mina)\s+\1\b/gi, '$1').trim();
+      const laminaSinPrefijo = laminaRaw.replace(/^l[áa]mina\s+/i, '').trim();
+      const calTxt = formatearCalibreLimpio(item.calibre);
+      const yaTieneCalibre = calTxt && laminaSinPrefijo.toLowerCase().includes(calTxt.toLowerCase());
+      const cal = calTxt && !yaTieneCalibre ? ` (${calTxt})` : '';
+      return `Lámina ${laminaSinPrefijo}${cal}`.replace(/\s+/g, ' ').trim();
     }
 
     return item.descripcion || 'Estructura Metalmecánica';
@@ -418,9 +430,10 @@ export default function Resumen({
   const obtenerDetalleTramo = useCallback((tr, item) => {
     const tipo = tr.tipoTubo || tr.tipo || item?.tipoTubo || 'Tubo Industrial';
     const diametro = tr.diametro || tr.diametroTexto || item?.diametro || '4';
-    const calibre = tr.calibre || tr.calibreTexto || item?.calibre || '14';
-    
-    return `Tubo ${tipo.replace(/tubo/gi, '').trim()} Calibre ${calibre} de Ø ${diametro}"`;
+    const calibreRaw = tr.calibre || tr.calibreTexto || item?.calibre || '14';
+    const calibreTxt = formatearCalibreLimpio(calibreRaw);
+
+    return `Tubo ${tipo.replace(/tubo/gi, '').trim()} ${calibreTxt} de Ø ${diametro}"`.replace(/\s+/g, ' ').trim();
   }, []);
 
   const obtenerObjetoBase = useCallback((item) => {
@@ -864,7 +877,7 @@ export default function Resumen({
                     <>
                       {(item.tipoGabinete === 'cofre_exteriores' || item.params?.tipoGabinete === 'cofre_exteriores' || item.configuracion?.tipoGabinete === 'cofre_exteriores') && (
                         <p className="text-orange-800 bg-orange-50 border border-orange-200 rounded px-1.5 py-1 leading-snug">
-                          <strong>• Especificación:</strong> Cofre Metálico para Exteriores (Intemperie) en Lámina Cold Rolled {item.calibre ? (String(item.calibre).toLowerCase().includes('calibre') ? item.calibre : `Calibre ${item.calibre}`) : (item.lamina || 'Estándar')}, con techo voladizo vierteaguas, puerta ciega con chapa de seguridad y bandeja interna desmontable en color naranja.
+                          <strong>• Especificación:</strong> Cofre Metálico para Exteriores (Intemperie) en Lámina Cold Rolled {item.calibre ? (String(item.calibre).toLowerCase().includes('calibre') ? item.calibre : `Calibre ${item.calibre}`) : (item.lamina || 'Estándar')}, con techo voladizo vierteaguas y puerta ciega con chapa de seguridad.
                         </p>
                       )}
                       <p><strong className="text-slate-900">• Dimensiones:</strong> {item.alto || 120} cm (alto) x {item.ancho || 60} cm (ancho) x {item.fondo || 60} cm (fondo).</p>

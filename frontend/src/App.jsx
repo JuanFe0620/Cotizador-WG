@@ -507,9 +507,10 @@ export default function App() {
       if (accesoriosListaFinal.length === 0) {
         if (paramsParaBackend.bujeInicial && paramsParaBackend.bujeInicial.precio) {
           const pIni = Number(paramsParaBackend.bujeInicial.precio) || 0;
+          const nomIni = String(paramsParaBackend.bujeInicial.nombre || '').replace(/^buje\s*:\s*/i, '').trim();
           accesoriosListaFinal.push({
             id: `buje_${paramsParaBackend.bujeInicial.id}`,
-            nombre: `Buje: ${paramsParaBackend.bujeInicial.nombre}`,
+            nombre: /^buje\b/i.test(nomIni) ? nomIni : `Buje: ${nomIni}`,
             cantidad: 1,
             precioUnitario: pIni,
             precio: pIni,
@@ -519,9 +520,10 @@ export default function App() {
         if (paramsParaBackend.bujeFinal && paramsParaBackend.bujeFinal.precio) {
           const cantFin = (paramsParaBackend.tipoBrazo === 'T' || paramsParaBackend.tipoBrazo === 'T_BILATERAL') ? 2 : 1;
           const pFin = Number(paramsParaBackend.bujeFinal.precio) || 0;
+          const nomFin = String(paramsParaBackend.bujeFinal.nombre || '').replace(/^buje\s*:\s*/i, '').trim();
           accesoriosListaFinal.push({
             id: `buje_${paramsParaBackend.bujeFinal.id}`,
-            nombre: `Buje: ${paramsParaBackend.bujeFinal.nombre}`,
+            nombre: /^buje\b/i.test(nomFin) ? nomFin : `Buje: ${nomFin}`,
             cantidad: cantFin,
             precioUnitario: pFin,
             precio: pFin * cantFin,
@@ -599,7 +601,11 @@ export default function App() {
       const laminaObj = laminas.find(l => String(l.id) === String(paramsParaBackend.laminaId));
       if (laminaObj) {
         calibreLamina = laminaObj.calibre || '';
-        materialNombre = `${laminaObj.material || 'Lámina'} (${laminaObj.calibre || 'Estándar'})`;
+        const matBase = String(laminaObj.material || 'Lámina').replace(/^l[áa]mina\s+/i, '').trim();
+        const calBase = calibreLamina
+          ? (String(calibreLamina).toLowerCase().includes('calibre') ? calibreLamina : `Calibre ${calibreLamina}`)
+          : 'Estándar';
+        materialNombre = `${matBase} (${calBase})`;
       }
     }
 
@@ -609,7 +615,7 @@ export default function App() {
       ? (String(calibreLamina).toLowerCase().includes('calibre') ? calibreLamina : `Calibre ${calibreLamina}`)
       : 'Calibre Estándar';
     const descripcionItem = esCofreExteriores
-      ? `Cofre Metálico para Exteriores (Intemperie) en Lámina Cold Rolled ${calibreTextoCofre}, con techo voladizo vierteaguas, puerta ciega con chapa de seguridad y bandeja interna desmontable en color naranja`
+      ? `Cofre Metálico para Exteriores (Intemperie) en Lámina Cold Rolled ${calibreTextoCofre}, con techo voladizo vierteaguas y puerta ciega con chapa de seguridad`
       : `${materialNombre} - Pintura: ${paramsParaBackend.nombrePintura || 'Estándar'} (${dataServidor?.area_m2 || 1.5} m²)`;
 
     const nuevoItem = {
@@ -825,7 +831,7 @@ export default function App() {
             onError={(e) => { if (!e.currentTarget.src.endsWith('/logo.png') && !esDistribuidor) e.currentTarget.style.display = 'none'; }}
           />
           <h1 className="text-base font-bold text-slate-900 hidden md:block truncate max-w-[220px]">
-            {esDistribuidor ? (perfil?.nombre_comercial || 'Mi Empresa') : 'Plataforma Integrada M3'}
+            {esDistribuidor ? (perfil?.nombre_comercial || 'Mi Empresa') : 'Cotizador WG'}
           </h1>
         </div>
 

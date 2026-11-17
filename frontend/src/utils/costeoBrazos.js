@@ -78,7 +78,7 @@ export function calcularCostosBrazoParametrico(
 
   tramos.forEach((tramo) => {
     const lonCm = Math.max(0, parseFloat(tramo.alto ?? tramo.longitud ?? 60) || 0);
-    const tuboObj = resolverTubo(tramo.tuboId || tramo.tubo_id, tramo);
+    const tuboObj = resolverTubo(tramo.tuboId || tramo.tubo_id || params.tuboId, tramo);
     const precioTira6m = parseFloat(tuboObj.precio_tira_6m || tuboObj.precio || 40000);
     costoTubosBase += (precioTira6m / 600.0) * lonCm * 2.0;
     longitudTotalTubosCm += lonCm;
@@ -87,7 +87,7 @@ export function calcularCostosBrazoParametrico(
   if (esBrazoT) {
     const lonTravesanoCm = Math.max(20, parseFloat(params.longitudTravesanoT ?? params.longitudTravesanoTCm ?? 50) || 50);
     const ultimoTramo = tramos[tramos.length - 1] || {};
-    const tuboTrav = resolverTubo(ultimoTramo.tuboId || ultimoTramo.tubo_id, ultimoTramo);
+    const tuboTrav = resolverTubo(ultimoTramo.tuboId || ultimoTramo.tubo_id || params.tuboId, ultimoTramo);
     const precioTira6m = parseFloat(tuboTrav.precio_tira_6m || tuboTrav.precio || 40000);
     costoTubosBase += (precioTira6m / 600.0) * lonTravesanoCm * 2.0;
     longitudTotalTubosCm += lonTravesanoCm;

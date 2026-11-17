@@ -682,7 +682,7 @@ export default function Configurador({
                   </div>
                   {params.tipoGabinete === 'cofre_exteriores' && (
                     <p className="text-[10px] text-orange-700 bg-orange-50 border border-orange-200 rounded-lg px-2 py-1 leading-snug">
-                      Incluye techo/visera voladiza, marco vierteaguas, puerta ciega con chapa cromada y bandeja interna desmontable naranja.
+                      Incluye techo/visera voladiza, marco vierteaguas y puerta ciega con chapa cromada.
                     </p>
                   )}
                 </div>

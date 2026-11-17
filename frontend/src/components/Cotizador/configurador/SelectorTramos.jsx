@@ -144,22 +144,122 @@ export default function SelectorTramos({
     });
   };
 
+  const seleccionarTuboBrazo = (tuboId) => {
+    const tuboObj = tubos.find(t => String(t.id) === String(tuboId));
+
+    setParams(prev => {
+      const tramosActuales = prev.tramos || [];
+      if (!tuboObj) {
+        return {
+          ...prev,
+          tuboId: '',
+          tramos: tramosActuales.map(t => ({ ...t, tuboId: '' }))
+        };
+      }
+
+      const formaReal = (tuboObj.forma || prev.forma || tramosActuales[0]?.forma || 'redondo').toLowerCase();
+      const diametroPulg = parseFloat(tuboObj.diametro_pulg || tuboObj.diametro || 2.0);
+      const anchoCm = parseFloat(tuboObj.ancho_cm || 4.0);
+      const altoCm = parseFloat(tuboObj.alto_cm || anchoCm || 4.0);
+      const calibreVal = tuboObj.calibre || '';
+      const tuboNombreVal = `${tuboObj.material || ''} ${calibreVal} ${
+        formaReal === 'cuadrado' ? `${anchoCm}x${altoCm} cm` : `${diametroPulg}"`
+      }`.trim();
+
+      const propsTubo = {
+        tuboId: tuboObj.id,
+        forma: formaReal,
+        tipo: formaReal,
+        tipoPerfil: formaReal,
+        seccion: formaReal,
+        diametro: diametroPulg,
+        diametro_pulg: diametroPulg,
+        ancho_cm: anchoCm,
+        alto_cm: altoCm,
+        calibre: calibreVal,
+        tuboNombre: tuboNombreVal
+      };
+
+      return {
+        ...prev,
+        ...propsTubo,
+        tramos: tramosActuales.map(t => ({ ...t, ...propsTubo }))
+      };
+    });
+  };
+
+  const cambiarFormaBrazo = (nuevaForma) => {
+    const formaLimpia = String(nuevaForma || 'redondo').toLowerCase();
+    const opcionesForma = obtenerTubosFiltrados(formaLimpia);
+
+    setParams(prev => {
+      const tramosActuales = prev.tramos || [];
+      const idActual = prev.tuboId || tramosActuales[0]?.tuboId;
+      const tuboActual = opcionesForma.find(tb => String(tb.id) === String(idActual));
+      const tuboRef = tuboActual || opcionesForma[0] || null;
+
+      let propsTubo;
+      if (tuboRef) {
+        const diametroPulg = parseFloat(tuboRef.diametro_pulg || tuboRef.diametro || 2.0);
+        const anchoCm = parseFloat(tuboRef.ancho_cm || 4.0);
+        const altoCm = parseFloat(tuboRef.alto_cm || anchoCm || 4.0);
+        const calibreVal = tuboRef.calibre || '';
+        propsTubo = {
+          tuboId: tuboRef.id,
+          forma: formaLimpia,
+          tipo: formaLimpia,
+          tipoPerfil: formaLimpia,
+          seccion: formaLimpia,
+          diametro: diametroPulg,
+          diametro_pulg: diametroPulg,
+          ancho_cm: anchoCm,
+          alto_cm: altoCm,
+          calibre: calibreVal,
+          tuboNombre: `${tuboRef.material || ''} ${calibreVal} ${
+            formaLimpia === 'cuadrado' ? `${anchoCm}x${altoCm} cm` : `${diametroPulg}"`
+          }`.trim()
+        };
+      } else {
+        propsTubo = {
+          tuboId: '',
+          forma: formaLimpia,
+          tipo: formaLimpia,
+          tipoPerfil: formaLimpia,
+          seccion: formaLimpia,
+          ancho_cm: parseFloat(prev.ancho_cm || tramosActuales[0]?.ancho_cm) || 4.0,
+          alto_cm: parseFloat(prev.alto_cm || tramosActuales[0]?.alto_cm) || 4.0,
+          diametro: parseFloat(prev.diametro_pulg || prev.diametro || tramosActuales[0]?.diametro) || 2.0,
+          diametro_pulg: parseFloat(prev.diametro_pulg || prev.diametro || tramosActuales[0]?.diametro_pulg) || 2.0
+        };
+      }
+
+      return {
+        ...prev,
+        ...propsTubo,
+        tramos: tramosActuales.map(t => ({ ...t, ...propsTubo }))
+      };
+    });
+  };
+
   const agregarTramo = () => {
     const ultimoTramo = tramos[tramos.length - 1] || tramos[0] || {};
-    const formaHeredada = ultimoTramo.forma || ultimoTramo.tipo || 'redondo';
+    const formaHeredada = (esBrazo ? (params.forma || ultimoTramo.forma) : ultimoTramo.forma) || ultimoTramo.tipo || 'redondo';
     const nuevo = {
       id: Date.now(),
       alto: 40,
       longitud: 40,
       angulo: 0,
-      tuboId: ultimoTramo.tuboId || '',
+      tuboId: (esBrazo ? (params.tuboId || ultimoTramo.tuboId) : ultimoTramo.tuboId) || '',
       forma: formaHeredada,
       tipo: formaHeredada,
       tipoPerfil: formaHeredada,
-      diametro: ultimoTramo.diametro ?? 2.0,
-      diametro_pulg: ultimoTramo.diametro_pulg ?? 2.0,
-      ancho_cm: ultimoTramo.ancho_cm ?? 4.0,
-      alto_cm: ultimoTramo.alto_cm ?? 4.0
+      seccion: formaHeredada,
+      diametro: (esBrazo ? (params.diametro ?? ultimoTramo.diametro) : ultimoTramo.diametro) ?? 2.0,
+      diametro_pulg: (esBrazo ? (params.diametro_pulg ?? ultimoTramo.diametro_pulg) : ultimoTramo.diametro_pulg) ?? 2.0,
+      ancho_cm: (esBrazo ? (params.ancho_cm ?? ultimoTramo.ancho_cm) : ultimoTramo.ancho_cm) ?? 4.0,
+      alto_cm: (esBrazo ? (params.alto_cm ?? ultimoTramo.alto_cm) : ultimoTramo.alto_cm) ?? 4.0,
+      calibre: (esBrazo ? (params.calibre ?? ultimoTramo.calibre) : ultimoTramo.calibre) || '',
+      tuboNombre: (esBrazo ? (params.tuboNombre ?? ultimoTramo.tuboNombre) : ultimoTramo.tuboNombre) || ''
     };
     setParams(prev => ({ ...prev, tramos: [...(prev.tramos || []), nuevo] }));
   };
@@ -291,6 +391,55 @@ export default function SelectorTramos({
               Incluir Pie de Amigo (Varilla de Refuerzo)
             </span>
           </label>
+
+          {/* Selector único de Tubo / Calibre / Diámetro para todo el brazo */}
+          {(() => {
+            const formaBrazo = (params.forma || tramos[0]?.forma || 'redondo').toLowerCase();
+            const tuboIdBrazo = params.tuboId || tramos[0]?.tuboId || '';
+            const tubosOpcionesBrazo = obtenerTubosFiltrados(formaBrazo);
+
+            return (
+              <div className="pt-2 border-t border-slate-200/80 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">
+                    Tipo de Tubo / Calibre / Diámetro
+                  </label>
+                  <select
+                    value={formaBrazo}
+                    onChange={e => cambiarFormaBrazo(e.target.value)}
+                    className="bg-white text-slate-700 text-[10px] rounded-lg px-2 py-1 border border-slate-300 outline-none font-medium cursor-pointer focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="redondo">Tubo Redondo</option>
+                    <option value="cuadrado">Tubo Cuadrado</option>
+                  </select>
+                </div>
+
+                <select
+                  value={tuboIdBrazo}
+                  onChange={e => seleccionarTuboBrazo(e.target.value)}
+                  className="w-full bg-white border border-slate-300 rounded-lg p-2 text-slate-800 text-xs outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">
+                    -- Selecciona Tubo {formaBrazo === 'cuadrado' ? 'cuadrado' : 'redondo'} (todo el brazo) --
+                  </option>
+                  {tubosOpcionesBrazo.map(t => {
+                    const precio = Number(t.precio_tira_6m || t.precio || 0);
+                    const precioFormat = precio.toLocaleString('es-CO');
+
+                    const medidaTxt = t.forma === 'cuadrado'
+                      ? `${t.ancho_cm || 4}x${t.alto_cm || 4} cm`
+                      : `Ø ${formatearPulgadas(t.diametro_pulg)}`;
+
+                    return (
+                      <option key={t.id} value={t.id}>
+                        {t.material ? `${t.material} - ` : ''}{t.calibre ? `${t.calibre} - ` : ''}{medidaTxt}{!modoCliente ? ` - ($${precioFormat}/tira)` : ''}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -311,14 +460,16 @@ export default function SelectorTramos({
                 </span>
 
                 <div className="flex items-center gap-2">
-                  <select
-                    value={tramo.forma || 'redondo'}
-                    onChange={e => actualizarTramo(tramo.id, 'forma', e.target.value)}
-                    className="bg-white text-slate-700 text-[10px] rounded-lg px-2 py-1 border border-slate-300 outline-none font-medium cursor-pointer focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="redondo">Tubo Redondo</option>
-                    <option value="cuadrado">Tubo Cuadrado</option>
-                  </select>
+                  {!esBrazo && (
+                    <select
+                      value={tramo.forma || 'redondo'}
+                      onChange={e => actualizarTramo(tramo.id, 'forma', e.target.value)}
+                      className="bg-white text-slate-700 text-[10px] rounded-lg px-2 py-1 border border-slate-300 outline-none font-medium cursor-pointer focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="redondo">Tubo Redondo</option>
+                      <option value="cuadrado">Tubo Cuadrado</option>
+                    </select>
+                  )}
 
                   {tramos.length > 1 && (
                     <button
@@ -333,32 +484,34 @@ export default function SelectorTramos({
                 </div>
               </div>
 
-              {/* Selector de Tubo */}
-              <div>
-                <select
-                  value={tramo.tuboId || ''}
-                  onChange={e => seleccionarTubo(tramo.id, e.target.value)}
-                  className="w-full bg-white border border-slate-300 rounded-lg p-2 text-slate-800 text-xs outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="">
-                    -- Selecciona Tubo {tramo.forma === 'cuadrado' ? 'cuadrado' : 'redondo'} --
-                  </option>
-                  {tubosOpciones.map(t => {
-                    const precio = Number(t.precio_tira_6m || t.precio || 0);
-                    const precioFormat = precio.toLocaleString('es-CO');
+              {/* Selector de Tubo (solo para Postes; en Brazos es único en la cabecera) */}
+              {!esBrazo && (
+                <div>
+                  <select
+                    value={tramo.tuboId || ''}
+                    onChange={e => seleccionarTubo(tramo.id, e.target.value)}
+                    className="w-full bg-white border border-slate-300 rounded-lg p-2 text-slate-800 text-xs outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">
+                      -- Selecciona Tubo {tramo.forma === 'cuadrado' ? 'cuadrado' : 'redondo'} --
+                    </option>
+                    {tubosOpciones.map(t => {
+                      const precio = Number(t.precio_tira_6m || t.precio || 0);
+                      const precioFormat = precio.toLocaleString('es-CO');
 
-                    let medidaTxt = t.forma === 'cuadrado' 
-                      ? `${t.ancho_cm || 4}x${t.alto_cm || 4} cm` 
-                      : `Ø ${formatearPulgadas(t.diametro_pulg)}`;
+                      let medidaTxt = t.forma === 'cuadrado' 
+                        ? `${t.ancho_cm || 4}x${t.alto_cm || 4} cm` 
+                        : `Ø ${formatearPulgadas(t.diametro_pulg)}`;
 
-                    return (
-                      <option key={t.id} value={t.id}>
-                        {t.material ? `${t.material} - ` : ''}{t.calibre ? `${t.calibre} - ` : ''}{medidaTxt}{!modoCliente ? ` - ($${precioFormat}/tira)` : ''}
-                      </option>
-                    );
-                  })}
-                </select>
-              </div>
+                      return (
+                        <option key={t.id} value={t.id}>
+                          {t.material ? `${t.material} - ` : ''}{t.calibre ? `${t.calibre} - ` : ''}{medidaTxt}{!modoCliente ? ` - ($${precioFormat}/tira)` : ''}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+              )}
 
               {/* Longitud */}
               <div className="pt-1 border-t border-slate-200/60 space-y-2">
